@@ -77,7 +77,7 @@ def register(registry) -> None:
         title="项目二 · 世界编织",
         kicker="ECHO PROJECT 02 // WORLD WEAVING",
         lead="这是一项生成式体验。请先核对科学母题、身份与真实世界书节选，再决定是否进入故事。",
-        entry_path="/api/echo/launch",
+        entry_path="/weave/",
         scripts=(
             f"{STATIC_URL_PREFIX}/echo-embed-bridge.js",
             f"{STATIC_URL_PREFIX}/echo-project-two-entry.js",

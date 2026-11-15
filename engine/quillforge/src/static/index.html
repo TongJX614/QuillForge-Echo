@@ -149,6 +149,14 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .footer-strip .dots i{width:5px;height:5px;border-radius:50%;background:var(--border-hover)}
 .footer-strip .dots i:first-child{background:var(--accent)}
 @media(max-width:640px){.side-mark{display:none}.case-head .stamp{right:4px!important}}
+/* 已接入项目卡片区（通用样式，不含任何项目专有内容） */
+.project-cards{max-width:1100px;margin:0 auto 40px;padding:0 24px;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+.project-card{padding:24px;border:1px solid var(--border);border-radius:14px;background:rgba(24,34,52,.6);display:flex;flex-direction:column;gap:10px}
+.project-card-kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:2.5px;color:var(--accent)}
+.project-card-title{font-family:var(--font-serif);font-size:22px;letter-spacing:2px;color:var(--text-strong)}
+.project-card-lead{font-size:13px;color:var(--muted);line-height:1.7;flex:1}
+.project-card-entry{align-self:flex-start;padding:8px 18px;border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-size:13px;text-decoration:none}
+.project-card-entry:hover{background:rgba(111,168,160,.12)}
 </style>
 </head>
 <body>
@@ -165,6 +173,10 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 </div>
 
 <div class="container" id="app"></div>
+
+<!-- 已接入项目卡片区：内容由 /api/projects 提供，未接入任何项目时整块隐藏。
+     引擎自身不认识任何具体项目，卡片的文案与脚本全部来自注册表。 -->
+<div class="project-cards" id="projectCards" hidden></div>
 
 <script>
 const API = '';
@@ -642,6 +654,62 @@ async function api(path, opts={}) {
 }
 
 showHomeScreen();
+</script>
+<script>
+// 通用项目卡片加载：向 /api/projects 取注册表内容，渲染卡片并按序注入项目脚本。
+// 引擎不理解脚本内容，只负责插入；未接入任何项目时该区块保持隐藏。
+(function () {
+  const mount = document.getElementById('projectCards');
+  if (!mount) return;
+
+  const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function escapeText(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+  }
+
+  // 只接受站内绝对路径，挡掉 javascript: 之类的伪协议
+  function safePath(value) {
+    const text = String(value == null ? '' : value);
+    return text.startsWith('/') && !text.startsWith('//') ? text : '';
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.async = false;
+      el.onload = () => resolve(true);
+      el.onerror = () => resolve(false);
+      document.body.appendChild(el);
+    });
+  }
+
+  fetch('/api/projects', { headers: { Accept: 'application/json' } })
+    .then((response) => (response.ok ? response.json() : null))
+    .then(async (data) => {
+      const cards = (data && data.cards) || [];
+      if (!cards.length) return;
+      mount.innerHTML = cards.map((card) => {
+        const entry = safePath(card.entryPath);
+        return [
+          '<section class="project-card" data-project="' + escapeText(card.project) + '">',
+          card.kicker ? '<div class="project-card-kicker">' + escapeText(card.kicker) + '</div>' : '',
+          '<h2 class="project-card-title">' + escapeText(card.title) + '</h2>',
+          card.lead ? '<p class="project-card-lead">' + escapeText(card.lead) + '</p>' : '',
+          entry ? '<a class="project-card-entry" href="' + escapeText(entry) + '">进入</a>' : '',
+          '</section>',
+        ].join('');
+      }).join('');
+      mount.hidden = false;
+      // 顺序加载，保证后面的脚本能依赖前面脚本注册的全局对象
+      for (const card of cards) {
+        for (const src of (card.scripts || []).map(safePath).filter(Boolean)) {
+          await loadScript(src);
+        }
+      }
+    })
+    .catch(() => { /* 取不到注册表就保持隐藏，不影响引擎自身页面 */ });
+})();
 </script>
 </body>
 </html>
