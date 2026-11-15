@@ -126,6 +126,36 @@ class Harness:
             .get("thresholds", {}) or {}
         )
 
+    @staticmethod
+    def _collect_validation_feedback(validation: Optional[ValidationResult]) -> str:
+        """把阻断级失败项的具体原因拼成可回注的文本。"""
+        if not validation:
+            return ""
+        return "\n".join(
+            f"- {c.name}：{c.detail}"
+            for c in validation.checks
+            if not c.passed and c.severity in ("critical", "high")
+        )
+
+    @staticmethod
+    def _inject_validation_feedback(extra, feedback: str) -> None:
+        """兼容 ExtraContext 与 dict 两种 extra 形态。"""
+        if hasattr(extra, "validation_feedback"):
+            extra.validation_feedback = feedback
+        elif isinstance(extra, dict):
+            extra["_validationFeedback"] = feedback
+
+    @staticmethod
+    def _extra_str(extra, key: str, attr: str) -> str:
+        """从 extra 读取字符串字段，兼容 ExtraContext 与 dict。"""
+        if extra is None:
+            return ""
+        if hasattr(extra, attr):
+            return str(getattr(extra, attr, "") or "")
+        if isinstance(extra, dict):
+            return str(extra.get(key, "") or "")
+        return ""
+
     def _apply_fallback(
         self,
         ctx: PreparedContext,
@@ -135,6 +165,7 @@ class Harness:
         choices: list[Choice],
         validation: Optional[ValidationResult],
         max_retries: int,
+        extra=None,
     ) -> tuple[list[Dialogue], ValidationResult]:
         """公共 Fallback 逻辑：对话不足时启用三层保底，返回修正后的 (dialogues, validation)。"""
         min_req = harness_input.options.dialogue_count_min
@@ -150,7 +181,9 @@ class Harness:
             choices=choices,
             validation=validation,
         )
-        fallback_dialogues = self.fallback.execute(ctx.assembled, self.sut, state, min_required=min_req)
+        script_context = self._extra_str(extra, "_scriptSceneRaw", "script_scene_raw")[:1500]
+        fallback_dialogues = self.fallback.execute(
+            ctx.assembled, self.sut, state, min_required=min_req, script_context=script_context)
         if len(fallback_dialogues) < min_req:
             fallback_dialogues = self.fallback.hardcode_fallback(ctx.assembled, min_req)
         if fallback_dialogues:
@@ -163,8 +196,15 @@ class Harness:
             max_dialogues=harness_input.options.dialogue_count_max,
             thresholds=self._get_thresholds(),
             judge=self.sut.judge_personality,
+            allowed_entities=self._extra_str(extra, "_allowedEntities", "allowed_entities"),
+            script_scene_raw=self._extra_str(extra, "_scriptSceneRaw", "script_scene_raw"),
+            script_global_raw=self._extra_str(extra, "_scriptGlobalRaw", "script_global_raw"),
         )
         validation = validator.validate_all(narration, dialogues, choices, retry_count=max_retries + 1)
+        fidelity = validator.check_script_entity_fidelity(narration, dialogues, choices)
+        validation.checks.append(fidelity)
+        if not fidelity.passed:
+            validation.passed = False
         return dialogues, validation
 
     def _build_output(
@@ -284,10 +324,14 @@ class Harness:
             feedback = "; ".join(
                 f"{c.name}: {c.detail}" for c in validation.checks if not c.passed
             )
+            # 同时把阻断级失败项注入 extra，供系统提示词的 validationFeedback 锚点渲染
+            retry_feedback = self._collect_validation_feedback(validation)
+            if retry_feedback:
+                self._inject_validation_feedback(extra, retry_feedback)
 
         # ── 4. Fallback 检查 ──
         dialogues, validation = self._apply_fallback(
-            ctx, harness_input, narration, dialogues, choices, validation, max_retries
+            ctx, harness_input, narration, dialogues, choices, validation, max_retries, extra
         )
 
         # ── 5. 构建 HarnessOutput ──
@@ -411,13 +455,16 @@ class Harness:
                 feedback = "; ".join(
                     f"{c.name}: {c.detail}" for c in validation.checks if not c.passed
                 )
+                retry_feedback = self._collect_validation_feedback(validation)
+                if retry_feedback:
+                    self._inject_validation_feedback(extra, retry_feedback)
 
             # ── 4. Fallback 检查 ──
             min_req = harness_input.options.dialogue_count_min
             if len(dialogues) < min_req:
                 old_dialogues = dialogues
                 dialogues, validation = self._apply_fallback(
-                    ctx, harness_input, narration, dialogues, choices, validation, max_retries
+                    ctx, harness_input, narration, dialogues, choices, validation, max_retries, extra
                 )
                 # 流式下保底触发时重新推送全部内容
                 if dialogues is not old_dialogues:

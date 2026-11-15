@@ -59,13 +59,15 @@ class ChoicesStage(StageBase):
         if self._extra_get(extra, "_hasScriptChoices"):
             logger.info("[Stage 4/5] 选择分支 (跳过：剧本已定义选项)")
             script_choices_raw = self._extra_get(extra, "_scriptChoices", [])
+            # 剧本未填 effect 时补默认值（轮换措辞兼顾多样性），否则 schema_compliance 必挂且重试无意义
+            _default_effects = ("推动剧情发展", "深入探索当前处境", "谨慎观察后再行动")
             return [
                 Choice(
                     text=c.get("text", ""),
-                    effect=c.get("effect", ""),
+                    effect=c.get("effect", "") or _default_effects[i % len(_default_effects)],
                     worldline_impact=c.get("worldlineImpact", "advance"),
                 )
-                for c in script_choices_raw
+                for i, c in enumerate(script_choices_raw)
             ]
 
         user_prompt = self._build_prompt(ctx.assembled, input_data, extra, narration, dialogues, sut, feedback=feedback)

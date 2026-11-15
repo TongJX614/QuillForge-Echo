@@ -114,6 +114,15 @@ class StageBase(ABC):
             "sceneHooks": extra.get("_sceneHooks", ""),
             "characterVoiceTones": extra.get("_characterVoiceTones", ""),
             "activeBranchContext": extra.get("_activeBranchContext", ""),
+            "sceneAtmosphere": extra.get("_sceneAtmosphere", ""),
+            "narrativeNotes": extra.get("_narrativeNotes", ""),
+            "emotionalArc": extra.get("_emotionalArc", ""),
+            "extraVisualAssets": extra.get("_extraVisualAssets", []),
+            "audioAssets": extra.get("_audioAssets", []),
+            "scriptSceneRaw": extra.get("_scriptSceneRaw", ""),
+            "scriptGlobalRaw": extra.get("_scriptGlobalRaw", ""),
+            "allowedEntities": extra.get("_allowedEntities", ""),
+            "validationFeedback": extra.get("_validationFeedback", ""),
         }
 
     @staticmethod

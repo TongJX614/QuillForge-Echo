@@ -101,9 +101,15 @@ def render_template(template: str, variables: dict) -> str:
             # 用 dict 的键值替换模板变量
             for k, v in item_dict.items():
                 rendered = rendered.replace(f"{{{{this.{k}}}}}", str(v))
-            # 清理空值行：删除只包含标签但值为空的行
-            rendered = re.sub(r'(?m)^[\s]*[^{]*\{\{this\.\w+\}\}.*$', '', rendered)
-            # 清理标签已替换但值为空的行（如 "  动机：\n" 或 "- 秘密：\n"）
+            # 未替换的 {{this.xxx}} 一律降级为空串，不再整行删除。
+            # 旧逻辑会因单个字段缺失（如 age / occupation）把含姓名、身份、
+            # 性格的整行一起吞掉，导致 LLM 完全看不到角色设定。
+            leftover = re.findall(r'\{\{this\.\w+\}\}', rendered)
+            if leftover:
+                logger.warning("[render_template] 角色卡残留未替换变量 %s，已按空值处理",
+                               sorted(set(leftover)))
+                rendered = re.sub(r'\{\{this\.\w+\}\}', '', rendered)
+            # 清理标签已替换但值为空的行（如 "  动机：" 或 "- 秘密："）
             rendered = re.sub(r'(?m)^[\s]*[-•]?\s*[^：:\n]+[：:]\s*$', '', rendered)
             # 清理连续空行
             rendered = re.sub(r'\n{3,}', '\n\n', rendered)
@@ -197,9 +203,16 @@ class NarrativeSUT:
                 "coreConflict": extra.core_conflict,
                 "themes": extra.themes,
                 "relationshipNetwork": extra.relationship_network,
-                "sceneAtmosphere": extra.scene_details[:200] if extra.scene_details else "",
-                "narrativeNotes": "",
-                "emotionalArc": "",
+                "sceneAtmosphere": (
+                    extra.scene_atmosphere
+                    or (extra.scene_details[:200] if extra.scene_details else "")
+                ),
+                "narrativeNotes": extra.narrative_notes,
+                "emotionalArc": extra.emotional_arc,
+                "scriptSceneRaw": extra.script_scene_raw,
+                "scriptGlobalRaw": extra.script_global_raw,
+                "allowedEntities": extra.allowed_entities,
+                "validationFeedback": extra.validation_feedback,
                 "minDialogues": harness_input.options.dialogue_count_min,
                 "maxDialogues": harness_input.options.dialogue_count_max,
             }
@@ -217,6 +230,10 @@ class NarrativeSUT:
                 ),
                 "narrativeNotes": extra.get("_narrativeNotes", ""),
                 "emotionalArc": extra.get("_emotionalArc", ""),
+                "scriptSceneRaw": extra.get("_scriptSceneRaw", ""),
+                "scriptGlobalRaw": extra.get("_scriptGlobalRaw", ""),
+                "allowedEntities": extra.get("_allowedEntities", ""),
+                "validationFeedback": extra.get("_validationFeedback", ""),
                 "minDialogues": harness_input.options.dialogue_count_min,
                 "maxDialogues": harness_input.options.dialogue_count_max,
             }

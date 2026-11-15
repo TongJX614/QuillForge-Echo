@@ -212,8 +212,10 @@ class DialogueStage(StageBase):
             speaker_map[c.name] = c.name
             speaker_map[c.name.lower()] = c.name
             if c.id:
-                speaker_map[c.id] = c.name
-                speaker_map[c.id.lower()] = c.name
-                speaker_map[c.id.replace("_", "")] = c.name
-                speaker_map[c.id.replace("_", "").lower()] = c.name
+                # YAML 可能把纯数字 id 解析为 int，防御性字符串化
+                cid = str(c.id)
+                speaker_map[cid] = c.name
+                speaker_map[cid.lower()] = c.name
+                speaker_map[cid.replace("_", "")] = c.name
+                speaker_map[cid.replace("_", "").lower()] = c.name
         return speaker_map

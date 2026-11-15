@@ -39,11 +39,12 @@ class FallbackStrategy(ABC):
 
     @abstractmethod
     def execute(self, ctx: AssembledContext, sut: NarrativeSUT, state: HarnessState,
-                min_required: int = 0) -> list[Dialogue]:
+                min_required: int = 0, script_context: str = "") -> list[Dialogue]:
         """执行保底策略，返回保底对话列表
 
         Args:
             min_required: 调用方要求的最低对话总数（子类应以此为目标生成）
+            script_context: 当前场景剧本原文，供保底生成锚定事实、避免脱离剧本
         """
         ...
 
@@ -62,12 +63,13 @@ class DialogueFallback(FallbackStrategy):
         return len(state.dialogues) < min_required
 
     def execute(self, ctx: AssembledContext, sut: NarrativeSUT, state: HarnessState,
-                min_required: int = 0) -> list[Dialogue]:
+                min_required: int = 0, script_context: str = "") -> list[Dialogue]:
         """执行三层保底
 
         Args:
             min_required: 调用方要求的最低对话总数。为 0 时回退到
                 当前已有对话数（向后兼容）。
+            script_context: 当前场景剧本原文（防幻觉锚点）。
         """
         # 以调用方要求的最低数为准，而非当前已有数，
         # 否则 Layer 1 索要的轮数永远达不到要求，白白浪费 LLM 调用
@@ -79,7 +81,7 @@ class DialogueFallback(FallbackStrategy):
 
         # Layer 1+2: LLM 极简 prompt 保底
         try:
-            raw = self._llm_fallback(ctx, sut, state.narration, min_count)
+            raw = self._llm_fallback(ctx, sut, state.narration, min_count, script_context)
             if isinstance(raw, list):
                 dialogues = self._filter_dialogues(raw, ctx)
                 if len(dialogues) >= min_count:
@@ -92,16 +94,25 @@ class DialogueFallback(FallbackStrategy):
         # Layer 3: 硬编码保底
         return self.hardcode_fallback(ctx, min_count)
 
-    def _llm_fallback(self, ctx: AssembledContext, sut: NarrativeSUT, narration: str, min_count: int) -> list:
-        """LLM 极简 prompt 保底生成"""
+    def _llm_fallback(self, ctx: AssembledContext, sut: NarrativeSUT, narration: str,
+                      min_count: int, script_context: str = "") -> list:
+        """LLM 极简 prompt 保底生成（带剧本原文锚点，避免脱离剧本裸生成）"""
         char_names = [c.name for c in ctx.active_characters]
         chars_text = "\n".join(
             f"- {c.name}（{c.role}）：{c.personality[:80]}，说话风格：{c.speaking_style[:50]}"
             for c in ctx.active_characters
         )
+        anchor = ""
+        if script_context:
+            anchor = (
+                "\n剧本原文（唯一事实来源，只能复述与润色这里已有的内容，"
+                "严禁出现剧本之外的人、地、事件、道具）：\n"
+                f"{script_context}\n"
+            )
         prompt = (
             f"你是一位剧本对话作家。请为以下场景写 {min_count} 轮角色对话。\n\n"
-            f"场景：{narration[:200]}\n\n"
+            f"场景：{narration[:200]}\n"
+            f"{anchor}\n"
             f"角色：\n{chars_text}\n\n"
             f"要求：\n"
             f"1. 必须生成恰好 {min_count} 轮对话\n"
@@ -111,7 +122,10 @@ class DialogueFallback(FallbackStrategy):
             f"5. 直接输出 JSON 数组，不要添加其他文字\n\n"
             f'输出格式：[{{"speaker": "角色名", "text": "对话内容", "emotion": "平静"}}]'
         )
-        system = "你是一位专业的剧本对话作家，严格按JSON格式输出。"
+        system = (
+            "你是一位专业的剧本对话作家，严格按JSON格式输出。"
+            "所有台词必须贴切剧本原文，不得出现剧本之外的人物、地点、事件、道具或专有名称。"
+        )
         return sut.call_json(system, prompt, _retries=2)
 
     def _filter_dialogues(self, raw: list, ctx: AssembledContext) -> list[Dialogue]:

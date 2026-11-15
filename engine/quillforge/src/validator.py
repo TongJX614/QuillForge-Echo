@@ -7,11 +7,23 @@ Narrative Generation Harness — 验证器
 """
 
 from __future__ import annotations
+import re
 from abc import ABC, abstractmethod
 from schemas import (
     Dialogue, Choice, AssembledContext, HarnessOutput,
     ValidationCheck, ValidationResult,
 )
+
+
+def _load_validation_thresholds() -> dict:
+    """从 config 读取 validationGate.thresholds；读取失败时返回空 dict 交由默认值兜底。"""
+    try:
+        from config_manager import load_config
+        thresholds = (load_config().get("quillforge", {}).get("stages", {})
+                      .get("validationGate", {}).get("thresholds", {}))
+        return thresholds if isinstance(thresholds, dict) else {}
+    except Exception:
+        return {}
 
 
 # ═══════════════════════════════════════════════════════
@@ -55,27 +67,37 @@ class NarrativeValidator(Validator):
     VALID_IMPACTS = {"advance", "advance_risky", "stay_current", "side_branch"}
 
     def __init__(self, context: AssembledContext, min_dialogues: int = 3, max_dialogues: int = 5,
-                 thresholds: dict | None = None, judge=None):
+                 thresholds: dict | None = None, judge=None,
+                 allowed_entities: str = "", script_scene_raw: str = "",
+                 script_global_raw: str = ""):
         """
         Args:
             thresholds: 验证阈值，来自 config/quillforge_config.yaml
                 quillforge.stages.validationGate.thresholds，支持键：
                 personalityMatchScore / worldlineAdherenceScore / worldlineAdherenceScoreFinal
                 / personalitySeverity / personalityJudge
+                未显式注入时自行从 config 读取。
             judge: 可选的性格 LLM 评审回调 `judge(char, lines) -> float | None`，
                 由 Stage 5 注入（实现见 NarrativeSUT.judge_personality）。
                 关键词词表完全未命中时用它兜底，避免恒定中性分导致检查失效。
+            allowed_entities / script_scene_raw / script_global_raw: 剧本事实基准，
+                供 check_script_entity_fidelity 判定「剧本外实体」。默认空字符串，
+                未注入时该检查自动跳过，保持既有调用方向后兼容。
         """
         self.context = context
         self.min_dialogues = min_dialogues
         self.max_dialogues = max_dialogues
-        _t = thresholds or {}
+        _t = thresholds if thresholds is not None else _load_validation_thresholds()
+        self.thresholds = _t
         self.personality_threshold = float(_t.get("personalityMatchScore", 0.5))
         self.personality_severity = str(_t.get("personalitySeverity", "high"))
         self.personality_judge_enabled = bool(_t.get("personalityJudge", True))
         self.worldline_threshold = float(_t.get("worldlineAdherenceScore", 0.12))
         self.worldline_threshold_final = float(_t.get("worldlineAdherenceScoreFinal", 0.08))
         self.character_names = {c.name for c in context.active_characters}
+        self.allowed_entities = allowed_entities or ""
+        self.script_scene_raw = script_scene_raw or ""
+        self.script_global_raw = script_global_raw or ""
         self._judge = judge
 
     def validate_all(
@@ -107,6 +129,112 @@ class NarrativeValidator(Validator):
             passed=passed,
             checks=checks,
             retry_count=retry_count,
+        )
+
+    # ═══════════════════════════════════════════════════════
+    # 剧本贴合度：剧本外实体检测（由 Stage 5 追加调用）
+    # ═══════════════════════════════════════════════════════
+
+    ENTITY_SUFFIXES = (
+        "公司", "集团", "组织", "协会", "研究所", "学院", "大学", "医院", "酒店",
+        "实验室", "工坊", "基地", "空间站", "会议室", "大厅", "塔", "舰", "城",
+        "局", "站", "系统", "计划", "事件", "案",
+    )
+    PERSON_TITLES = ("先生", "女士", "小姐", "博士", "教授", "警官", "队长", "老板", "经理")
+    GENERIC_PREFIXES = ("这", "那", "某", "一", "整个", "所有", "我们", "他们",
+                        "自己", "新的", "旧的", "一座", "一家", "我", "你", "他",
+                        "她", "它", "谁", "有", "没", "个", "位", "名")
+    VERB_PREFIXES = ("你走进", "你走入", "你来到", "我走进", "这里是", "那里是",
+                     "走进", "走入", "来到", "回到", "前往", "进入", "抵达",
+                     "穿过", "站在", "坐在", "这是", "那是", "在", "到", "从", "向")
+
+    def _extract_entity_candidates(self, text: str) -> list[str]:
+        """抽取高置信度的专有实体候选。宁可漏判，不可误判。"""
+        cands: list[str] = []
+        for m in re.findall(r'[「《“『]([^」》”』\n]{2,12})[」》”』]', text):
+            cands.append(m.strip())
+        for m in re.finditer(
+            r'([\u4e00-\u9fff]{1,4})(' + "|".join(self.PERSON_TITLES) + r')', text
+        ):
+            cands.append(m.group(0))
+        for m in re.finditer(
+            r'([\u4e00-\u9fff]{2,8})(' + "|".join(self.ENTITY_SUFFIXES) + r')', text
+        ):
+            cands.append(m.group(0))
+        return cands
+
+    def check_script_entity_fidelity(self, narration: str, dialogues: list[Dialogue],
+                                     choices: list[Choice]) -> ValidationCheck:
+        """检查生成内容是否出现剧本之外的人 / 地 / 事件 / 道具。
+
+        独立于 validate_all 的 8 项检查，由 Stage 5 追加调用，避免破坏
+        既有「八项校验」契约。severity=high，未通过会真正阻断重试。
+        """
+        if not (self.allowed_entities or self.script_scene_raw):
+            return ValidationCheck(
+                name="script_entity_fidelity", passed=True, severity="high",
+                detail="未注入剧本实体清单，跳过检查", score=1.0,
+            )
+
+        parts = [narration or ""]
+        parts.extend(getattr(d, "text", "") or "" for d in (dialogues or []))
+        for c in (choices or []):
+            parts.append(getattr(c, "text", "") or "")
+            parts.append(getattr(c, "effect", "") or "")
+        generated = "\n".join(parts)
+        corpus = "\n".join(filter(None, (
+            self.allowed_entities, self.script_scene_raw, self.script_global_raw,
+        )))
+        allowed_names = [n.strip() for n in self.allowed_entities.splitlines() if n.strip()]
+        # 领属写法「苏然的记忆工坊」等价于实体本身「记忆工坊」，一并纳入，
+        # 否则「退回记忆工坊」这类正常表达会被误判成剧本外实体。
+        expanded = set(allowed_names)
+        for n in allowed_names:
+            if "的" in n:
+                tail = n.split("的", 1)[1].strip()
+                if len(tail) >= 2:
+                    expanded.add(tail)
+        allowed_names = sorted(expanded, key=len, reverse=True)
+
+        bad: list[str] = []
+        for cand in self._extract_entity_candidates(generated):
+            core = cand
+            suffix = ""
+            for s in self.ENTITY_SUFFIXES + self.PERSON_TITLES:
+                if core.endswith(s) and len(core) > len(s):
+                    core = core[: -len(s)]
+                    suffix = s
+                    break
+            # 正则会把动词一起吞进候选（如「你走进玄武门实验室」），剥掉后再判断
+            for p in self.VERB_PREFIXES:
+                if core.startswith(p) and len(core) > len(p) + 1:
+                    core = core[len(p):]
+                    break
+            display = (core + suffix) if suffix else core
+            min_core_len = 1 if suffix in self.PERSON_TITLES else 2
+            if len(core) < min_core_len or any(core.startswith(p) for p in self.GENERIC_PREFIXES):
+                continue
+            if cand in corpus or core in corpus:
+                continue
+            # 正则会把动词一起吞进来（如「你走进记忆工坊」），只要候选里
+            # 嵌着剧本已知实体，就说明是在复述剧本而非另造实体。
+            if any(n in cand or core in n or n in core for n in allowed_names):
+                continue
+            if any(n in cand for n in self.character_names):
+                continue
+            if core in self.character_names:
+                continue
+            bad.append(display)
+
+        bad = list(dict.fromkeys(bad))
+        return ValidationCheck(
+            name="script_entity_fidelity",
+            passed=not bad,
+            severity="high",
+            detail=("检测到剧本外实体：" + "、".join(bad[:8]) +
+                    "。请删除这些名称，只用剧本原文里已有的人、地、事件、道具重新生成。")
+            if bad else "未发现剧本外实体",
+            score=0.0 if bad else 1.0,
         )
 
     def check_schema(self, narration: str, dialogues: list[Dialogue], choices: list[Choice]) -> ValidationCheck:

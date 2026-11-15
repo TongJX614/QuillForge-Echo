@@ -31,6 +31,8 @@ class GenericScriptAdapter:
         self.characters: list[dict] = []
         self.scenes: list[dict] = []
         self.scene_assets: list[dict] = []  # 素材清单里的「场景背景」素材（name/mood/details）
+        self.extra_visual_assets: list[dict] = []  # 非场景背景类视觉素材（插图/UI元素/角色立绘等）
+        self.audio_assets: list[dict] = []  # 音频素材（BGM/音效）
         self.worldline_nodes: list[str] = []
         self.worldbook: str = ""
         self.narrative_style: str = ""
@@ -115,6 +117,9 @@ class GenericScriptAdapter:
 
         # ── 场景背景素材解析（素材清单.yaml：name/mood/details） ──
         self.scene_assets = self._parse_scene_assets(data)
+
+        # ── 其余素材解析（非背景视觉素材 + 音频素材） ──
+        self.extra_visual_assets, self.audio_assets = self._parse_other_assets(data)
 
         # ── 世界书 ──
         if not self.worldbook:
@@ -384,6 +389,41 @@ class GenericScriptAdapter:
                         ]
         return []
 
+    def _parse_other_assets(self, data: dict) -> tuple[list[dict], list[dict]]:
+        """从素材清单.yaml 提取非场景背景类视觉素材与音频素材。
+
+        返回 (extra_visual_assets, audio_assets)，供前端展示/播放与
+        Prompt 氛围参考，保证素材清单内容全部被管线消费。
+        """
+        assets = data.get("assets", {})
+        if not isinstance(assets, dict):
+            return [], []
+
+        extra_visual: list[dict] = []
+        visual = assets.get("visual", [])
+        if isinstance(visual, list):
+            for item in visual:
+                if not isinstance(item, dict) or item.get("type") == "场景背景":
+                    continue
+                extra_visual.append({
+                    "type": str(item.get("type", "")).strip(),
+                    "name": str(item.get("name", "")).strip(),
+                    "description": str(item.get("description", item.get("details", ""))).strip(),
+                })
+
+        audio: list[dict] = []
+        raw_audio = assets.get("audio", [])
+        if isinstance(raw_audio, list):
+            for item in raw_audio:
+                if not isinstance(item, dict):
+                    continue
+                audio.append({
+                    "name": str(item.get("name", "")).strip(),
+                    "type": str(item.get("type", item.get("usage", ""))).strip(),
+                    "description": str(item.get("description", item.get("details", ""))).strip(),
+                })
+        return extra_visual, audio
+
     def get_scene_bg_sources(self) -> list[dict]:
         """为每个游戏场景匹配用于生图背景的场景素材。
         按顺序一一对应：第 i 个游戏场景配 scene_assets[i]（回响里游戏场景 location
@@ -485,6 +525,124 @@ class GenericScriptAdapter:
 
         return matched
 
+    # ═══════════════════════════════════════════════════════
+    # 剧本原文锚定 / 允许实体清单（防幻觉地基）
+    # ═══════════════════════════════════════════════════════
+
+    _SCENE_RAW_MAX_CHARS = 8000
+    _GLOBAL_RAW_MAX_CHARS = 6000
+
+    def _scene_raw_text(self, scene_index: int) -> str:
+        """返回当前场景的完整原文（含台词、选项、触发条件），用于锚定 LLM 输出。
+
+        优先取 raw_data 中未被归一化的原始场景（保留 assets_needed 等额外字段），
+        并按场景 id 匹配，避免 world_lines 推导顺序与 scenes 顺序不一致。
+        """
+        scene = self.scenes[scene_index]
+        source = scene
+        raw_scenes = self.raw_data.get("scenes", [])
+        if isinstance(raw_scenes, list):
+            sid = str(scene.get("id", "") or "")
+            if sid:
+                for rs in raw_scenes:
+                    if isinstance(rs, dict) and str(
+                        rs.get("id", rs.get("scene_id", "")) or ""
+                    ) == sid:
+                        source = rs
+                        break
+            elif scene_index < len(raw_scenes) and isinstance(raw_scenes[scene_index], dict):
+                source = raw_scenes[scene_index]
+
+        keys = (
+            "id", "name", "location", "time", "atmosphere", "description",
+            "characters_present", "narrative_notes", "interactions",
+            "choices", "options", "trigger_conditions", "critical_choice",
+            "branching_point", "assets_needed",
+        )
+        empty = (None, "", [], {})
+        payload = {k: source[k] for k in keys if k in source and source[k] not in empty}
+        if not payload:
+            payload = {k: v for k, v in scene.items() if v not in empty}
+        text = yaml.dump(payload, allow_unicode=True, sort_keys=False,
+                         default_flow_style=False)
+        if len(text) > self._SCENE_RAW_MAX_CHARS:
+            text = text[:self._SCENE_RAW_MAX_CHARS] + "\n# …（原文过长，已截断）"
+        return text.strip()
+
+    def _global_setting_text(self) -> str:
+        """世界书全文（字节级原文），作为全局事实基准。"""
+        text = (self.worldbook or "").strip()
+        if len(text) > self._GLOBAL_RAW_MAX_CHARS:
+            text = text[:self._GLOBAL_RAW_MAX_CHARS] + "\n…（世界书过长，已截断）"
+        return text
+
+    def _allowed_entities_text(self) -> str:
+        """抽取剧本中所有已命名的人 / 地 / 事件 / 道具，作为允许实体白名单。
+
+        每行一个名称，供 prompt 明确告知 LLM 可用实体，也供验证器做越界检测。
+        """
+        names: list[str] = []
+
+        def add(value) -> None:
+            if isinstance(value, str):
+                v = value.strip()
+                if 1 < len(v) <= 40 and "\n" not in v:
+                    names.append(v)
+
+        def iter_list(value):
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                out = []
+                for v in value.values():
+                    if isinstance(v, list):
+                        out.extend(v)
+                return out
+            return []
+
+        data = self.raw_data
+        for c in iter_list(data.get("characters")):
+            if isinstance(c, dict):
+                add(c.get("name"))
+                add(c.get("id"))
+        for s in iter_list(data.get("scenes")) or self.scenes:
+            if isinstance(s, dict):
+                add(s.get("name"))
+                add(s.get("location"))
+                add(s.get("id"))
+        for key in ("events", "endings", "key_choices"):
+            for item in iter_list(data.get(key)):
+                if isinstance(item, dict):
+                    add(item.get("name") or item.get("title"))
+                    add(item.get("id"))
+        for wl in iter_list(data.get("world_lines")):
+            if isinstance(wl, dict):
+                add(wl.get("name"))
+                for p in iter_list(wl.get("path")):
+                    if isinstance(p, dict):
+                        add(p.get("name") or p.get("scene_id"))
+        assets = data.get("assets", {})
+        if isinstance(assets, dict):
+            for group in ("visual", "audio", "props", "items"):
+                for a in iter_list(assets.get(group)):
+                    if isinstance(a, dict):
+                        add(a.get("name"))
+        for r in iter_list(data.get("relationships")):
+            if isinstance(r, dict):
+                add(r.get("from"))
+                add(r.get("to"))
+                add(r.get("character"))
+        for match in re.findall(r'\*\*(.+?)\*\*|《(.+?)》', self.worldbook or ""):
+            add(match[0] or match[1])
+
+        seen = set()
+        uniq = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                uniq.append(n)
+        return "\n".join(uniq[:300])
+
     def build_harness_input(
         self,
         scene_index: int,
@@ -548,6 +706,9 @@ class GenericScriptAdapter:
         harness_input["_sceneAtmosphere"] = scene.get("atmosphere", "")
         harness_input["_narrativeNotes"] = scene.get("narrative_notes", "")
         harness_input["_emotionalArc"] = self._extract_emotional_arc(scene_index)
+        # 非背景视觉素材与音频素材（供 Prompt 氛围参考与前端消费）
+        harness_input["_extraVisualAssets"] = self.extra_visual_assets
+        harness_input["_audioAssets"] = self.audio_assets
 
         # ── 剧本全局上下文注入（与 auto-run 流对齐） ──
         scene_id = scene.get("id", "")
@@ -564,6 +725,11 @@ class GenericScriptAdapter:
         harness_input["_endings"] = self._extract_endings()
         harness_input["_worldlines"] = self._extract_worldlines()
         harness_input["_sceneDetails"] = self._extract_scene_details(scene)
+
+        # ── 剧本原文锚定：把被 _extract_* 截断掉的台词/选项/触发条件补回 prompt ──
+        harness_input["_scriptSceneRaw"] = self._scene_raw_text(scene_index)
+        harness_input["_scriptGlobalRaw"] = self._global_setting_text()
+        harness_input["_allowedEntities"] = self._allowed_entities_text()
 
         # ── 活跃世界线分支检测：根据玩家选择历史确定当前分支，注入高优先级上下文 ──
         active_branch = self._detect_active_branch(choice_history)
@@ -762,6 +928,8 @@ class GenericScriptAdapter:
                     # 保留选项顶层的关系/性格影响数据
                     "relationship_changes": c.get("relationship_changes", []),
                     "personality_impact": c.get("personality_impact", ""),
+                    # 保留小游戏声明（{type, hint}），供会话层触发内嵌小游戏
+                    "minigame": c.get("minigame") if isinstance(c.get("minigame"), dict) else {},
                 })
             elif isinstance(c, str):
                 result.append({"id": str(len(result)), "text": c, "description": ""})
@@ -1341,8 +1509,17 @@ class GenericScriptAdapter:
             return str(stages[scene_index].get("emotional_arc", "")).strip()
         return ""
 
-    def to_summary(self) -> dict:
-        """返回剧本摘要信息"""
+    def to_summary(
+        self,
+        *,
+        worldbook_excerpt: str = "",
+        worldbook_truncated: bool = False,
+    ) -> dict:
+        """返回剧本摘要信息
+
+        worldbook_excerpt / worldbook_truncated 为可选的世界书审阅节选
+        （ECHO 项目二入口契约需要），默认空值，保持既有调用方向后兼容。
+        """
         return {
             "title": self.title,
             "characters": [c["name"] for c in self.characters],
@@ -1353,6 +1530,8 @@ class GenericScriptAdapter:
             "scene_names": [s.get("name", s.get("id", "")) for s in self.scenes],
             "has_worldbook": bool(self.worldbook),
             "is_realtime": bool(self.raw_data.get("is_realtime", False)) if isinstance(self.raw_data, dict) else False,
+            "worldbook_excerpt": worldbook_excerpt,
+            "worldbook_truncated": worldbook_truncated,
         }
 
     @staticmethod

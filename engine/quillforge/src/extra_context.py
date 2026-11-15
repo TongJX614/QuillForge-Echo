@@ -37,8 +37,19 @@ class ExtraContext:
     player_state: str = ""
     character_voice_tones: str = ""
     active_branch_context: str = ""
+    scene_atmosphere: str = ""
+    narrative_notes: str = ""
+    emotional_arc: str = ""
     has_script_choices: bool = False
     script_choices: list = field(default_factory=list)
+    extra_visual_assets: list = field(default_factory=list)
+    audio_assets: list = field(default_factory=list)
+    # 剧本原文锚定（防幻觉）：当前场景完整原文、全局设定、允许实体清单
+    script_scene_raw: str = ""
+    script_global_raw: str = ""
+    allowed_entities: str = ""
+    # 上一轮验证失败原因，回注到重试 prompt
+    validation_feedback: str = ""
 
     @classmethod
     def from_dict(cls, extra: dict) -> "ExtraContext":
@@ -63,8 +74,17 @@ class ExtraContext:
             player_state=extra.get("_playerState", ""),
             character_voice_tones=extra.get("_characterVoiceTones", ""),
             active_branch_context=extra.get("_activeBranchContext", ""),
+            scene_atmosphere=extra.get("_sceneAtmosphere", ""),
+            narrative_notes=extra.get("_narrativeNotes", ""),
+            emotional_arc=extra.get("_emotionalArc", ""),
             has_script_choices=extra.get("_hasScriptChoices", False),
             script_choices=extra.get("_scriptChoices", []),
+            extra_visual_assets=extra.get("_extraVisualAssets", []),
+            audio_assets=extra.get("_audioAssets", []),
+            script_scene_raw=extra.get("_scriptSceneRaw", ""),
+            script_global_raw=extra.get("_scriptGlobalRaw", ""),
+            allowed_entities=extra.get("_allowedEntities", ""),
+            validation_feedback=extra.get("_validationFeedback", ""),
         )
 
     def to_prompt_variables(self) -> dict:
@@ -88,4 +108,13 @@ class ExtraContext:
             "sceneHooks": self.scene_hooks,
             "characterVoiceTones": self.character_voice_tones,
             "activeBranchContext": self.active_branch_context,
+            "sceneAtmosphere": self.scene_atmosphere,
+            "narrativeNotes": self.narrative_notes,
+            "emotionalArc": self.emotional_arc,
+            "extraVisualAssets": self.extra_visual_assets,
+            "audioAssets": self.audio_assets,
+            "scriptSceneRaw": self.script_scene_raw,
+            "scriptGlobalRaw": self.script_global_raw,
+            "allowedEntities": self.allowed_entities,
+            "validationFeedback": self.validation_feedback,
         }
