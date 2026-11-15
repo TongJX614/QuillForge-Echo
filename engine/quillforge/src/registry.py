@@ -40,10 +40,11 @@ class PageSpec:
 
 @dataclass(frozen=True)
 class StaticDirSpec:
-    """一个需要挂载的项目静态目录。"""
+    """一个需要挂载的项目静态目录。html=True 时按静态站点服务（目录默认取 index.html）。"""
 
     url_path: str
     directory: Path
+    html: bool = False
 
 
 @dataclass(frozen=True)

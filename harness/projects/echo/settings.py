@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 import os
 from pathlib import Path
-from typing import Optional
 
 PROJECT_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = PROJECT_DIR / "config"
@@ -20,6 +19,8 @@ STATIC_DIR = PROJECT_DIR / "static"
 # harness/projects/echo/settings.py → 上四级是仓库根
 REPO_ROOT = PROJECT_DIR.parents[2]
 DEFAULT_ECHO_HOME = REPO_ROOT / "projects" / "echo"
+# 世界编织成品页：ECHO 的 iframe 打开 <引擎>/weave/，内容由这里静态服务
+DEFAULT_WEAVE_HOME = DEFAULT_ECHO_HOME / "examples" / "narrative-demo"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -70,13 +71,11 @@ class EchoSettings:
     node: str = ""
     launch_mode: str = "dev"
     launch_timeout: float = 90.0
-    weave_game_home: Optional[Path] = None
+    weave_game_home: Path = DEFAULT_WEAVE_HOME
 
 
 @lru_cache()
 def get_echo_settings() -> EchoSettings:
-    weave_raw = os.environ.get("WEAVE_GAME_HOME", "").strip()
-    weave_home = _env_path("WEAVE_GAME_HOME", REPO_ROOT / weave_raw) if weave_raw else None
     return EchoSettings(
         enabled=_env_bool("ECHO_ENABLED", True),
         autostart=_env_bool("ECHO_AUTOSTART", True),
@@ -87,7 +86,7 @@ def get_echo_settings() -> EchoSettings:
         node=os.environ.get("ECHO_NODE", "").strip(),
         launch_mode=os.environ.get("ECHO_LAUNCH_MODE", "dev").strip() or "dev",
         launch_timeout=_env_float("ECHO_LAUNCH_TIMEOUT", 90.0),
-        weave_game_home=weave_home,
+        weave_game_home=_env_path("WEAVE_GAME_HOME", DEFAULT_WEAVE_HOME),
     )
 
 

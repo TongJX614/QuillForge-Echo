@@ -173,7 +173,7 @@ for _index, _mount in enumerate(_project_registry.static_dirs()):
     if not _mount_dir.is_dir():
         logger.warning("[registry] 项目静态目录不存在，跳过挂载: %s", _mount_dir)
         continue
-    app.mount(_mount.url_path, StaticFiles(directory=str(_mount_dir)),
+    app.mount(_mount.url_path, StaticFiles(directory=str(_mount_dir), html=_mount.html),
               name=f"project-static-{_index}")
 
 if not _project_registry.empty:

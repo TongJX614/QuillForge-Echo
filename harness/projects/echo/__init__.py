@@ -63,6 +63,13 @@ def register(registry) -> None:
         directory=STATIC_DIR,
     ))
 
+    # 世界编织成品页：ECHO 的 VR 入口用 iframe 打开 <引擎>/weave/
+    registry.register_static_dir(PROJECT_NAME, StaticDirSpec(
+        url_path="/weave",
+        directory=echo.weave_game_home,
+        html=True,
+    ))
+
     # embed-bridge 在被 iframe 嵌入时负责与宿主游戏通信；
     # project-two-entry 承载「世界编织」的主题/角色选择与世界书审阅入口。
     registry.register_card(PROJECT_NAME, ProjectCard(

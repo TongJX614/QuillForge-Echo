@@ -22,7 +22,7 @@ from typing import Any
 from config_manager import get_settings
 from logger import get_logger
 
-from .settings import REPO_ROOT, get_echo_settings
+from .settings import get_echo_settings
 
 logger = get_logger("echo_launcher")
 
@@ -102,11 +102,14 @@ def _echo_home() -> Path:
 
 
 def _env_file(home: Path) -> Path | None:
-    candidates = [REPO_ROOT / ".env", home / ".env"]
-    for path in candidates:
-        if path.is_file():
-            return path.resolve()
-    return None
+    """ECHO 自己的 .env。
+
+    只认 ECHO 目录下那一份：仓库根的 .env 属于引擎与 harness，里面没有
+    ECHO_LLM_SOURCE 这类 ECHO 必需项，交给 ECHO 会让它的环境校验直接失败。
+    找不到时返回 None，让 ECHO 按自己的根标记规则去解析。
+    """
+    candidate = home / ".env"
+    return candidate.resolve() if candidate.is_file() else None
 
 
 def _resolve_node(echo: Any) -> str | None:

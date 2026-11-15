@@ -27,8 +27,8 @@ def resolve_runtime_paths(
 ) -> RuntimePaths:
     environment = os.environ if environ is None else environ
     root = Path(app_root).resolve() if app_root is not None else Path(__file__).resolve().parents[1]
-    override = environment.get("QUILLFORGE_VAR_DIR")
-    if override is not None:
+    override = (environment.get("QUILLFORGE_VAR_DIR") or "").strip()
+    if override:
         runtime_root = Path(override)
         if not runtime_root.is_absolute():
             raise ValueError("QUILLFORGE_VAR_DIR_NOT_ABSOLUTE")
