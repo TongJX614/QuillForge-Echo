@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from generic_adapter import GenericScriptAdapter
 from logger import get_logger
 from quillforge import Harness
+from registry import get_registry
 
 logger = get_logger(__name__)
 
@@ -27,6 +28,7 @@ logger = get_logger(__name__)
 class SessionState(str, Enum):
     IDLE = "idle"
     GENERATED = "generated"
+    INTERLUDE = "interlude"
     CHOSEN = "chosen"
     FINISHED = "finished"
 
@@ -174,6 +176,35 @@ class GameSession:
         # 流式生成进行中标记：流式期间不持有锁（否则 SSE 全程阻塞其他操作），
         # 用该标记防止同一会话并发触发第二次生成
         self._generating = False
+        # 中断态（由已注册项目扩展接管，如剧情内嵌小游戏）：
+        # pending_interlude 仅在 INTERLUDE 状态非空；scratch 是扩展的私有暂存区，
+        # 引擎不解读其内容，场景推进时通知扩展自行清理。
+        self.pending_interlude: Optional[dict] = None
+        self.scratch: dict = {}
+
+    @property
+    def state_label(self) -> str:
+        """对外的状态名。处于中断态时改用扩展声明的名字，以保持既有前端契约。"""
+        if self.state is SessionState.INTERLUDE and self.pending_interlude:
+            name = self.pending_interlude.get("name")
+            if name:
+                return str(name)
+        return self.state.value
+
+    def _interlude_spec(self, name: Optional[str] = None):
+        """取已注册的中断态扩展；未指名时仅在恰好注册了一个时返回它。"""
+        registry = get_registry()
+        return registry.interlude(name) if name else registry.sole_interlude()
+
+    def _notify_scene_advance(self) -> None:
+        """场景推进后通知中断态扩展清理其暂存（如上一场景的随机注入记录）。"""
+        for interlude_name in get_registry().interlude_names():
+            spec = get_registry().interlude(interlude_name)
+            if spec is not None and spec.on_scene_advance is not None:
+                try:
+                    spec.on_scene_advance(self)
+                except Exception as exc:  # noqa: BLE001 - 扩展异常不应中断主线推进
+                    logger.warning("[session] 中断态扩展 %s 清理失败: %s", interlude_name, exc)
 
     @property
     def total_scenes(self) -> int:
@@ -193,11 +224,16 @@ class GameSession:
     def _generate_locked(self, harness: Harness) -> dict:
         if self.state == SessionState.GENERATED:
             raise HTTPException(400, "当前场景已生成，请先做出选择后才能继续")
+        if self.state == SessionState.INTERLUDE:
+            raise HTTPException(400, f"{self.state_label} 进行中，请先完成或取消")
         if self.state == SessionState.FINISHED:
             raise HTTPException(400, "故事已结束")
 
         if self.current_scene_index >= self.total_scenes:
             raise HTTPException(400, "没有更多场景")
+
+        # 新场景生成：通知中断态扩展作废上一场景的暂存
+        self._notify_scene_advance()
 
         player_choice = ""
         if self.history:
@@ -218,6 +254,11 @@ class GameSession:
         scene = self.adapter.scenes[self.current_scene_index] if self.current_scene_index < len(self.adapter.scenes) else {}
         script_choices = self.adapter.get_scene_choices(self.current_scene_index, choice_history=self.history or None)
 
+        # 空选项兜底：剧本与 LLM 都无选项时插入默认推进项，
+        # 避免玩家卡在无选项场景（终局场景点击即直达结局）
+        if not script_choices and not result.get("data", {}).get("nextChoices"):
+            result["data"]["nextChoices"] = self._fallback_choices()
+
         return {
             **result,
             "scene_meta": {
@@ -227,8 +268,12 @@ class GameSession:
                 "scene_index": self.current_scene_index + 1,
                 "total_scenes": self.total_scenes,
             },
-            "available_choices": script_choices,
-            "session_state": self.state.value,
+            "available_choices": self._prepare_scene_choices(script_choices),
+            "scene_assets": {
+                "audio": getattr(self.adapter, "audio_assets", []),
+                "visual_extra": getattr(self.adapter, "extra_visual_assets", []),
+            },
+            "session_state": self.state_label,
             "progress": round(self.progress, 2),
         }
 
@@ -245,6 +290,9 @@ class GameSession:
             if self.state == SessionState.GENERATED:
                 yield {"event": "error", "message": "当前场景已生成，请先做出选择后才能继续"}
                 return
+            if self.state == SessionState.INTERLUDE:
+                yield {"event": "error", "message": f"{self.state_label} 进行中，请先完成或取消"}
+                return
             if self.state == SessionState.FINISHED:
                 yield {"event": "error", "message": "故事已结束"}
                 return
@@ -253,6 +301,8 @@ class GameSession:
                 return
 
             self._generating = True
+            # 新场景生成：通知中断态扩展作废上一场景的暂存
+            self._notify_scene_advance()
 
             player_choice = ""
             if self.history:
@@ -280,8 +330,8 @@ class GameSession:
                         "scene_index": self.current_scene_index + 1,
                         "total_scenes": self.total_scenes,
                     },
-                    "available_choices": script_choices,
-                    "session_state": self.state.value,
+                    "available_choices": self._prepare_scene_choices(script_choices),
+                    "session_state": self.state_label,
                     "progress": round(self.progress, 2),
                 }
 
@@ -291,6 +341,10 @@ class GameSession:
             for evt in harness.run_stream(harness_input):
                 if evt.get("event") == "done":
                     result = evt.get("result")
+                elif (evt.get("event") == "choices" and not evt.get("choices")
+                        and not script_choices):
+                    # 空选项兜底（流式）：同上，终局场景点击即直达结局
+                    evt = {**evt, "choices": self._fallback_choices()}
                 yield evt
         finally:
             with self._lock:
@@ -309,14 +363,46 @@ class GameSession:
         if self._generating:
             raise HTTPException(400, "当前场景正在生成中，请稍候")
         if self.state != SessionState.GENERATED:
-            raise HTTPException(400, f"当前状态为 {self.state.value}，无法做出选择")
+            raise HTTPException(400, f"当前状态为 {self.state_label}，无法做出选择")
 
-        scene = self.adapter.scenes[self.current_scene_index] if self.current_scene_index < len(self.adapter.scenes) else {}
         script_choices = self.adapter.get_scene_choices(self.current_scene_index, choice_history=self.history or None)
 
         chosen = {"text": choice_text, "id": str(choice_index), "description": ""}
         if 0 <= choice_index < len(script_choices):
             chosen = script_choices[choice_index]
+
+        return self._apply_choice_locked(chosen)
+
+    def _fallback_choices(self) -> list[dict]:
+        """无选项场景的默认推进项（终局场景直达结局，其余线性推进）"""
+        if self.current_scene_index >= self.total_scenes - 1:
+            return [{"id": "__finish__", "text": "读完最终章", "description": "查看结局",
+                     "effect": "查看结局", "consequences": {}}]
+        return [{"id": "__advance__", "text": "继续", "description": "推进剧情",
+                 "effect": "推进剧情", "consequences": {}}]
+
+    def _prepare_scene_choices(self, script_choices: list[dict]) -> list[dict]:
+        """交给已注册的中断态扩展装饰选项（例如挂载玩法徽章）。
+
+        未注册任何扩展时原样返回。扩展应自行缓存本场景的装饰结果，保证同一
+        场景内多次调用一致，且不得修改 adapter 的原始数据。
+        """
+        spec = self._interlude_spec()
+        if spec is None or spec.prepare_choices is None:
+            return script_choices
+        try:
+            return spec.prepare_choices(self, script_choices)
+        except Exception as exc:  # noqa: BLE001 - 装饰失败不应阻断场景呈现
+            logger.warning("[session] 中断态扩展装饰选项失败，回退原始选项: %s", exc)
+            return script_choices
+
+    def _apply_choice_locked(self, chosen: dict, consequences_override: Optional[str] = None) -> dict:
+        """已确认选项的公共后处理：应用后果、写入历史、推进场景。
+
+        choose 与中断态扩展的结算路径共用；扩展结算时通过 consequences_override
+        用成败描述覆盖默认后果文本。调用前须已持有 self._lock。
+        """
+        scene = self.adapter.scenes[self.current_scene_index] if self.current_scene_index < len(self.adapter.scenes) else {}
 
         consequences = ""
         cons_data = chosen.get("consequences", {})
@@ -326,15 +412,17 @@ class GameSession:
             self.player_state.apply_consequences(cons_data, option_data=chosen)
         elif cons_data:
             consequences = str(cons_data)
+        if consequences_override:
+            consequences = consequences_override
 
         self.history.append({
             "scene_index": self.current_scene_index,
             "scene_id": scene.get("id", scene.get("scene_id", "")),
             "scene_name": scene.get("name", ""),
-            "narration": self.current_result.get("data", {}).get("narration", ""),
-            "dialogues": self.current_result.get("data", {}).get("dialogues", []),
-            "player_choice": chosen.get("text", choice_text),
-            "option_id": chosen.get("id", str(choice_index)),
+            "narration": self.current_result.get("data", {}).get("narration", "") if self.current_result else "",
+            "dialogues": self.current_result.get("data", {}).get("dialogues", []) if self.current_result else [],
+            "player_choice": chosen.get("text", ""),
+            "option_id": chosen.get("id", ""),
             "consequences": consequences,
         })
 
@@ -343,7 +431,16 @@ class GameSession:
         next_index = self._resolve_next_scene_index()
         logger.info(f"场景跳转: {self.current_scene_index} -> {next_index} (trigger_conditions)")
         self.current_scene_index = next_index
+        # 场景已推进：通知中断态扩展作废上一场景的暂存
+        self._notify_scene_advance()
 
+        return self._finish_response(chosen)
+
+    def _finish_response(self, chosen: dict) -> dict:
+        """场景推进后的统一出口：越界即 FINISHED 并附带结局匹配。
+
+        _apply_choice_locked 与 finish 共用；调用前须已持有 self._lock。
+        """
         if self.current_scene_index >= self.total_scenes:
             self.state = SessionState.FINISHED
             last_result = self.current_result
@@ -361,16 +458,98 @@ class GameSession:
                     "matched_ending": matched_ending,
                 },
             }
-        else:
-            self.state = SessionState.CHOSEN
-            self.current_result = None
 
+        self.state = SessionState.CHOSEN
+        self.current_result = None
         return {
             "chosen": chosen,
             "session_state": self.state.value,
             "progress": round(self.progress, 2),
             "message": "选择已确认",
         }
+
+    def finish(self) -> dict:
+        """终局场景无选项时直接完稿：记录本场景并进入结局。
+
+        终局场景（如结局演出场景）通常没有剧本选项，LLM 也可能返回空选项，
+        此时前端无法调 choose，提供本接口保证故事总能走到结局。
+
+        Raises:
+            HTTPException: 状态非法或非终局场景（仍有后续场景时不允许跳过）
+        """
+        with self._lock:
+            if self.state == SessionState.FINISHED:
+                raise HTTPException(400, "故事已结束")
+            if self.state != SessionState.GENERATED:
+                raise HTTPException(400, f"当前状态为 {self.state_label}，无法完稿")
+            if self.current_scene_index < self.total_scenes - 1:
+                raise HTTPException(400, "尚有未完成的场景，请继续选择")
+
+            scene = self.adapter.scenes[self.current_scene_index] if self.current_scene_index < len(self.adapter.scenes) else {}
+            self.history.append({
+                "scene_index": self.current_scene_index,
+                "scene_id": scene.get("id", scene.get("scene_id", "")),
+                "scene_name": scene.get("name", ""),
+                "narration": self.current_result.get("data", {}).get("narration", "") if self.current_result else "",
+                "dialogues": self.current_result.get("data", {}).get("dialogues", []) if self.current_result else [],
+                "player_choice": "",
+                "option_id": "",
+                "consequences": "",
+            })
+            self.previous_result = self.current_result
+            self.current_scene_index = self.total_scenes
+            self._notify_scene_advance()
+            logger.info("终局场景无选项，直接完稿进入结局")
+            return self._finish_response({"text": "", "id": "", "description": ""})
+
+    # ═══════════════════════════════════════════════
+    # 中断态：由已注册项目扩展实现具体玩法，引擎只提供状态槽与委托
+    # ═══════════════════════════════════════════════
+
+    def start_interlude(self, choice_index: int, name: Optional[str] = None) -> dict:
+        """玩家在 GENERATED 状态触发中断态玩法，成功后进入 INTERLUDE。
+
+        具体的合法性校验与内容生成由扩展负责；扩展抛出的 HTTPException 原样透出。
+        """
+        spec = self._interlude_spec(name)
+        if spec is None or spec.start is None:
+            raise HTTPException(400, "未注册可用的中断态玩法")
+        with self._lock:
+            if self.state != SessionState.GENERATED:
+                raise HTTPException(400, f"当前状态为 {self.state_label}，无法开始{spec.name}")
+            payload = spec.start(self, choice_index)
+            self.pending_interlude = {"name": spec.name, "choice_index": choice_index}
+            self.state = SessionState.INTERLUDE
+            logger.info("[session] 中断态开始: %s (choice_index=%s)", spec.name, choice_index)
+            return payload
+
+    def resolve_interlude(self, answer, name: Optional[str] = None) -> dict:
+        """结算中断态。是否终局、是否推进剧情由扩展决定并直接返回响应。"""
+        pending_name = (self.pending_interlude or {}).get("name")
+        spec = self._interlude_spec(name or pending_name)
+        if spec is None or spec.resolve is None:
+            raise HTTPException(400, "未注册可用的中断态玩法")
+        with self._lock:
+            if self.state != SessionState.INTERLUDE or not self.pending_interlude:
+                raise HTTPException(400, f"当前状态为 {self.state_label}，无待结算的中断态")
+            result = spec.resolve(self, answer)
+            if self.state is not SessionState.INTERLUDE:
+                self.pending_interlude = None
+            return result
+
+    def cancel_interlude(self, name: Optional[str] = None) -> dict:
+        """放弃中断态，回到 GENERATED 重新选择。"""
+        pending_name = (self.pending_interlude or {}).get("name")
+        spec = self._interlude_spec(name or pending_name)
+        with self._lock:
+            if self.state != SessionState.INTERLUDE:
+                raise HTTPException(400, f"当前状态为 {self.state_label}，无进行中的中断态")
+            result = {}
+            if spec is not None and spec.cancel is not None:
+                result = spec.cancel(self) or {}
+            self.pending_interlude = None
+            self.state = SessionState.GENERATED
+            return {**result, "session_state": self.state.value}
 
     def _resolve_next_scene_index(self) -> int:
         """根据当前场景的 trigger_conditions 和用户选择历史确定下一场景索引。
@@ -612,7 +791,7 @@ class GameSession:
         scene = self.adapter.scenes[self.current_scene_index] if self.current_scene_index < len(self.adapter.scenes) else {}
         return {
             "session_id": self.session_id,
-            "state": self.state.value,
+            "state": self.state_label,
             "progress": round(self.progress, 2),
             "current_scene": {
                 "id": scene.get("id", ""),

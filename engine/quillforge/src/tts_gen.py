@@ -27,6 +27,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from runtime_paths import resolve_runtime_paths
+
 # 加载项目 .env（与 image_gen.py 保持一致）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent  # quillforge
 try:
@@ -46,8 +48,8 @@ def _get_settings_safe():
         return None
 
 
-# 生成音频的磁盘缓存目录
-AUDIO_DIR = _PROJECT_ROOT / "generated_audio"
+# 生成音频的磁盘缓存目录（QUILLFORGE_VAR_DIR 可整体外置，避免写进引擎安装目录）
+AUDIO_DIR = resolve_runtime_paths().generated_audio
 
 # 参考音频样本目录（用于音色克隆）
 VOICE_SAMPLES_DIR = _PROJECT_ROOT / "voice_samples"

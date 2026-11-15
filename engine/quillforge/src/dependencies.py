@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Optional
 
 from cachetools import TTLCache
@@ -21,6 +22,7 @@ from realtime_engine import RealtimeStorySession
 from session_manager import GameSession
 from logger import get_logger
 from config_manager import get_settings
+from script_registry import registered_scripts
 
 logger = get_logger("dependencies")
 
@@ -125,8 +127,23 @@ class _RealtimeSessionCache(_LockedTTLCache):
 # ── 会话存储（TTL 自动过期，线程安全）──
 sessions: _LockedTTLCache = _LockedTTLCache(maxsize=100, ttl=SESSION_TTL)
 realtime_sessions: _RealtimeSessionCache = _RealtimeSessionCache(maxsize=50, ttl=SESSION_TTL)
-uploaded_scripts: dict[str, dict] = {}  # script_id -> {path, adapter, summary}
+# 上传与生成的剧本统一存放在 script_registry 的可信边界里（含路径逃逸与
+# reparse point 防护）；沿用 uploaded_scripts 这个名字以兼容既有路由的读法。
+uploaded_scripts = registered_scripts
 _loaded_stories: dict[str, dict] = {}  # path -> story data (轻量 API 缓存)
+
+
+@dataclass(frozen=True)
+class StartReceipt:
+    """/api/start 的幂等回执：同一 Idempotency-Key 只真正开一次局。"""
+
+    idempotency_key: str
+    script_id: str
+    response: dict
+
+
+start_receipts: dict[str, StartReceipt] = {}
+start_receipt_lock = threading.RLock()
 
 # ── 单例 ──
 _harness: Optional[Harness] = None

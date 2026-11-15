@@ -93,6 +93,53 @@ app.include_router(session_router)
 app.include_router(realtime_router)
 app.include_router(assets_router)
 
+# ── 引擎自带静态资源（前端按 /static/<file> 取用）──
+from fastapi.staticfiles import StaticFiles
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="engine-static")
+
+
+# ═══════════════════════════════════════════════════════
+# 已接入项目（QUILLFORGE_PROJECTS）
+#
+# 引擎核心不认识任何具体项目：项目模块通过 registry 声明自己的路由、页面、
+# 静态目录与首页卡片，在此统一挂载。未配置时下列循环都是空转，引擎行为
+# 与上游一致。
+# ═══════════════════════════════════════════════════════
+
+from registry import get_registry
+from routes.pages import serve_page_file
+
+_project_registry = get_registry()
+
+for _project_router in _project_registry.routers():
+    app.include_router(_project_router)
+
+for _page in _project_registry.pages():
+    # 默认参数绑定当前 _page，避免闭包捕获循环变量
+    app.add_api_route(
+        _page.path,
+        lambda _p=_page: serve_page_file(_p.static_name, _p.directory),
+        methods=["GET"],
+        summary=_page.summary or f"{_page.path} 页面",
+        include_in_schema=True,
+    )
+
+for _index, _mount in enumerate(_project_registry.static_dirs()):
+    _mount_dir = Path(_mount.directory)
+    if not _mount_dir.is_dir():
+        logger.warning("[registry] 项目静态目录不存在，跳过挂载: %s", _mount_dir)
+        continue
+    app.mount(_mount.url_path, StaticFiles(directory=str(_mount_dir)),
+              name=f"project-static-{_index}")
+
+if not _project_registry.empty:
+    logger.info("[registry] 已接入项目: %s | 路由 %d 组 | 页面 %d 个 | 静态挂载 %d 处",
+                ", ".join(p.name for p in _project_registry.projects()),
+                len(_project_registry.routers()), len(_project_registry.pages()),
+                len(_project_registry.static_dirs()))
+
 
 # ═══════════════════════════════════════════════════════
 # 启动

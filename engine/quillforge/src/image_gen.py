@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from content_guard import moderation_error_or_none, soften_image_prompt
+from runtime_paths import resolve_runtime_paths
 
 # 加载项目 .env（与 quillforge 保持一致：工作区根目录 + quillforge 目录）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent  # quillforge
@@ -44,8 +45,8 @@ def _get_settings_safe():
         return None
 
 
-# 生成图片的磁盘缓存目录
-IMAGES_DIR = _PROJECT_ROOT / "generated_images"
+# 生成图片的磁盘缓存目录（QUILLFORGE_VAR_DIR 可整体外置，避免写进引擎安装目录）
+IMAGES_DIR = resolve_runtime_paths().generated_images
 
 # 角色立绘自动去背景（rembg AI 抠图）：默认开启，设 IMAGE_REMOVE_BG=false 可关闭
 _settings = _get_settings_safe()

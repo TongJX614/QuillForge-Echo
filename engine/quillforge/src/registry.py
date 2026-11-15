@@ -27,11 +27,15 @@ PROJECTS_ENV = "QUILLFORGE_PROJECTS"
 
 @dataclass(frozen=True)
 class PageSpec:
-    """一个由项目提供的 HTML 页面。"""
+    """一个由项目提供的 HTML 页面。
+
+    directory 为 None 时在引擎自带的 static 目录下查找 static_name。
+    """
 
     path: str
     static_name: str
     summary: str = ""
+    directory: Optional[Path] = None
 
 
 @dataclass(frozen=True)

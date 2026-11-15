@@ -3,16 +3,27 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from typing import Annotated
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from generic_adapter import GenericScriptAdapter, load_story
+from runtime_paths import ensure_runtime_paths, resolve_runtime_paths
 from session_manager import GameSession
-from dependencies import sessions, uploaded_scripts, _loaded_stories
+from dependencies import (
+    StartReceipt,
+    _loaded_stories,
+    sessions,
+    start_receipt_lock,
+    start_receipts,
+    uploaded_scripts,
+)
+from script_registry import get_ready_script
 
 router = APIRouter(tags=["upload"])
 limiter = Limiter(key_func=get_remote_address)
@@ -21,9 +32,9 @@ limiter = Limiter(key_func=get_remote_address)
 _ALLOWED_UPLOAD_EXTS = {".yaml", ".yml", ".json", ".md", ".txt"}
 _MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
-UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-SAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "samples"
-UPLOAD_DIR.mkdir(exist_ok=True)
+_RUNTIME_PATHS = ensure_runtime_paths(resolve_runtime_paths())
+UPLOAD_DIR = _RUNTIME_PATHS.uploads
+SAMPLES_DIR = Path(__file__).resolve().parents[2] / "samples"
 SAMPLES_DIR.mkdir(exist_ok=True)
 
 
@@ -242,23 +253,54 @@ def upload_sample_path(path: str = ""):
         raise HTTPException(400, f"剧本解析失败: {str(e)}")
 
 
-@router.post("/api/start")
-def start_game(script_id: str = ""):
-    """开始游戏会话"""
-    if script_id and script_id in uploaded_scripts:
-        adapter = uploaded_scripts[script_id]["adapter"]
-    else:
-        raise HTTPException(400, "请先上传剧本文件")
-
-    # 空剧本（无场景）无法进行游戏，提前拒绝避免后续 500
+def _create_start_response(adapter: GenericScriptAdapter) -> dict[str, object]:
     if not adapter.scenes:
         raise HTTPException(400, "剧本中未解析到任何场景，无法开始游戏")
-
     session = GameSession(adapter)
     sessions[session.session_id] = session
-
     return {
         "session_id": session.session_id,
         "script": adapter.to_summary(),
         "state": session.get_state(),
     }
+
+
+@router.post("/api/start")
+def start_game(
+    script_id: str = "",
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+):
+    """开始游戏会话；带幂等头时只接受已审阅的 ready 生成记录。"""
+    if idempotency_key is None:
+        if not script_id or script_id not in uploaded_scripts:
+            raise HTTPException(400, "请先上传剧本文件")
+        adapter = uploaded_scripts[script_id]["adapter"]
+        return _create_start_response(adapter)
+
+    try:
+        parsed_key = uuid.UUID(idempotency_key)
+    except (AttributeError, ValueError):
+        raise HTTPException(400, "Idempotency-Key 必须是有效 UUID") from None
+    if str(parsed_key) != idempotency_key.lower():
+        raise HTTPException(400, "Idempotency-Key 必须是有效 UUID")
+
+    with start_receipt_lock:
+        ready = get_ready_script(script_id)
+        if ready is None:
+            raise HTTPException(400, "审阅剧本尚未注册或未就绪")
+        receipt = start_receipts.get(idempotency_key)
+        if receipt is not None:
+            if receipt.script_id != script_id:
+                raise HTTPException(409, "Idempotency-Key 已绑定其他剧本")
+            return deepcopy(receipt.response)
+        response = _create_start_response(ready.adapter)
+        stored_response = deepcopy(response)
+        start_receipts[idempotency_key] = StartReceipt(
+            idempotency_key=idempotency_key,
+            script_id=script_id,
+            response=stored_response,
+        )
+        return deepcopy(stored_response)

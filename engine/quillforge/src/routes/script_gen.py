@@ -8,9 +8,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from content_guard import ContentSafetyError, scan_input
-from generic_adapter import GenericScriptAdapter
-from script_generator import generate_script
-from dependencies import uploaded_scripts
+from script_generator import SAMPLES_DIR, generate_script
+from script_registry import register_generated_script
 from logger import get_logger
 
 logger = get_logger("routes.script_gen")
@@ -24,7 +23,11 @@ class GenerateScriptRequest(BaseModel):
 
 @router.post("/api/generate-script")
 async def api_generate_script(body: GenerateScriptRequest):
-    """AI 生成剧本（SSE 流式返回进度）"""
+    """AI 生成剧本（SSE 流式返回进度）
+
+    生成完成后必须通过 script_registry 的世界书校验才会登记为 ready；
+    未登记的剧本无法用于 /api/start，即「先审阅、后开局」。
+    """
     user_prompt = body.prompt.strip()
     if not user_prompt:
         raise HTTPException(400, "请输入剧本描述")
@@ -35,34 +38,39 @@ async def api_generate_script(body: GenerateScriptRequest):
         raise HTTPException(400, verdict.message)
 
     def event_stream():
-        final_script_id = None
-        final_path = None
         try:
             for event in generate_script(user_prompt):
                 evt_type = event.get("type", "progress")
+                if evt_type == "done":
+                    script_id = event.get("script_id")
+                    script_path = event.get("path")
+                    try:
+                        record = register_generated_script(script_id, script_path, SAMPLES_DIR)
+                    except Exception as error:
+                        # 只透出稳定的错误码，不把内部路径/异常文本回给客户端
+                        logger.warning("[script_gen] registry rejection: %s", type(error).__name__)
+                        err = json.dumps(
+                            {
+                                "type": "error",
+                                "code": "SCRIPT_REGISTRATION_FAILED",
+                                "message": "生成结果未通过世界书校验",
+                            },
+                            ensure_ascii=False,
+                        )
+                        yield f"event: error\ndata: {err}\n\n"
+                        return
+                    event = {
+                        "type": "done",
+                        "script_id": record.script_id,
+                        "summary": record.summary,
+                    }
                 payload = json.dumps(event, ensure_ascii=False)
                 yield f"event: {evt_type}\ndata: {payload}\n\n"
-                if evt_type == "done":
-                    final_script_id = event.get("script_id")
-                    final_path = event.get("path")
         except ContentSafetyError as e:
             logger.info("[script_gen] 模型内容审核拦截: %s", e.message)
             payload = json.dumps({"type": "error", "message": e.message}, ensure_ascii=False)
             yield f"event: error\ndata: {payload}\n\n"
             return
-
-        if final_script_id and final_path:
-            try:
-                adapter = GenericScriptAdapter()
-                adapter.load(final_path)
-                summary = adapter.to_summary()
-                uploaded_scripts[final_script_id] = {
-                    "path": final_path,
-                    "adapter": adapter,
-                    "summary": summary,
-                }
-            except Exception as e:
-                logger.warning("[script_gen] 剧本摘要缓存失败: %s", e)
 
     return StreamingResponse(
         event_stream(),

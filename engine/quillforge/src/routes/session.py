@@ -364,3 +364,23 @@ def get_history(session_id: str):
     if not session:
         raise HTTPException(404, "会话不存在")
     return {"history": session.history}
+
+
+@router.post("/api/session/{session_id}/finish", summary="终局场景无选项时直接完稿进入结局")
+def finish_story(session_id: str):
+    """终局场景既无剧本选项也无 LLM 选项时，前端调本接口直达结局页，
+    响应体与 choose 返回 finished 时一致（含 ending.matched_ending）。"""
+    session = sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    return session.finish()
+
+
+@router.post("/api/session/{session_id}/exit", summary="退出当前剧本（销毁会话）")
+def exit_session(session_id: str):
+    """玩家退出当前剧本：移除会话，后续生成/选择请求将拒绝，
+    不会再产生任何模型调用。"""
+    session = sessions.pop(session_id, None)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    return {"ok": True, "session_id": session_id}
