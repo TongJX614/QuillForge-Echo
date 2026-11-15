@@ -61,7 +61,7 @@ def list_projects() -> dict:
                 "kicker": c.kicker,
                 "lead": c.lead,
                 "entryPath": c.entry_path,
-                "script": c.script_name,
+                "scripts": list(c.scripts),
             }
             for c in registry.cards()
         ],

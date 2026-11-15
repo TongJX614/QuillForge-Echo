@@ -48,14 +48,18 @@ class StaticDirSpec:
 
 @dataclass(frozen=True)
 class ProjectCard:
-    """引擎首页「已接入项目」区的一张卡片。"""
+    """引擎首页「已接入项目」区的一张卡片。
+
+    scripts 是随卡片一起注入首页的脚本 URL 列表（按顺序加载），用于承载
+    项目自己的入口逻辑；引擎只负责插入 script 标签，不理解其内容。
+    """
 
     project: str
     title: str
     kicker: str = ""
     lead: str = ""
     entry_path: str = ""
-    script_name: Optional[str] = None
+    scripts: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -78,12 +82,17 @@ class InterludeSpec:
 
 @dataclass(frozen=True)
 class ProcessSpec:
-    """项目自带子进程（例如宿游戏的 node 服务）的启停钩子。"""
+    """项目自带子进程（例如宿游戏的 node 服务）的启停钩子。
+
+    autostart 为真时，引擎在应用启动事件里调用 start（传入引擎实际端口），
+    失败只记录日志，不影响引擎自身可用。
+    """
 
     name: str
     start: Optional[Callable] = None
     stop: Optional[Callable] = None
     status: Optional[Callable] = None
+    autostart: bool = False
 
 
 @dataclass(frozen=True)

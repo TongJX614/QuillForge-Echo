@@ -1,0 +1,667 @@
+# ============================================================
+# ECHO 宿主节拍注册表
+# ============================================================
+# 引擎管内容、ECHO 管进度。本表把 ECHO 的 (scene, trigger, stage) 映射到
+# 引擎双剧本包的世界书/角色/节拍，并定义主线骨架（选项 + 动作 + 属性变化）。
+# 对白文本由 Harness 按世界书实时生成；未注册的触发器走自由生成。
+#
+# 选项的 actions 是 ECHO NarrativeAction（flag.set / quest.activate / stage.set …），
+# 引擎会自动追加 flag.set:echo_choice:<beat>:<choice_id> 用于回写分支与累计 stats。
+# stats 键与索尔维剧本包结局系统对齐（copenhagen_affinity / realism_affinity /
+# independence / wisdom / empathy / lorentz好感度 / einstein好感度 / de_broglie好感度）。
+
+packs:
+  frame: "samples/回响-DEMO"
+  solvay: "samples/索尔维/索尔维0801"
+
+# ── 角色对齐：echo_id → 剧本包角色 ──
+characters:
+  su_ran:        { pack: frame,  pack_id: su_ran,      name: "苏然", aliases: ["你", "玩家"] }
+  lin_xiao:      { pack: frame,  pack_id: lin_xiao,    name: "林晓" }
+  du_weiming:    { pack: frame,  pack_id: du_weiming,  name: "杜维明", aliases: ["杜未明"] }
+  astro_scientist: { pack: frame, pack_id: astro_scientist, name: "研究员", aliases: ["天体物理研究员"] }
+  astro_scientist_back: { pack: frame, pack_id: astro_scientist, name: "实验室研究员" }
+  astro_scientist_side: { pack: frame, pack_id: astro_scientist, name: "天体物理实验室研究员" }
+  researcher:    { pack: frame,  pack_id: researcher,  name: "研究员", aliases: ["VR研究员"] }
+  solvay_einstein:    { pack: solvay, pack_id: einstein,    name: "阿尔伯特·爱因斯坦", aliases: ["爱因斯坦"] }
+  solvay_bohr:        { pack: solvay, pack_id: bohr,        name: "尼尔斯·玻尔", aliases: ["玻尔"] }
+  solvay_heisenberg:  { pack: solvay, pack_id: heisenberg,  name: "维尔纳·海森堡", aliases: ["海森堡"] }
+  solvay_schrodinger: { pack: solvay, pack_id: schrodinger, name: "埃尔温·薛定谔", aliases: ["薛定谔"] }
+  solvay_pauli:       { pack: solvay, pack_id: pauli,       name: "沃尔夫冈·泡利", aliases: ["泡利"] }
+  solvay_curie:       { pack: solvay, pack_id: curie,       name: "玛丽·居里", aliases: ["居里夫人", "居里"] }
+  solvay_lorentz:     { pack: solvay, pack_id: lorentz,     name: "亨德里克·洛伦兹", aliases: ["洛伦兹"] }
+  solvay_de_broglie:  { pack: solvay, pack_id: de_broglie,  name: "路易·德布罗意", aliases: ["德布罗意"] }
+  solvay_born:        { pack: solvay, pack_id: born,        name: "马克斯·玻恩", aliases: ["玻恩", "波恩"] }
+
+# ── 主线节拍 ──
+beats:
+  # ===== 框架世界：记忆修复暗线 =====
+  - id: dlg_office_xiao
+    scene: office
+    trigger: lin_xiao
+    stage: prep
+    pack: frame
+    title: "匿名委托"
+    atmosphere: "深夜工坊，霓虹与仪器微光，压抑不安"
+    characters: [su_ran, lin_xiao]
+    prompt: "面对这封可疑的匿名委托，你的决定是"
+    description: |
+      林晓带来一封匿名委托邮件：修复一段来自织女号空间站的损坏记忆数据，
+      损坏率87%，报酬异常丰厚，条件是不备份、不外传。苏然直觉这背后有隐情。
+      对白应体现林晓的担忧与苏然的理性好奇，自然推进到接受或调查的抉择。
+    choices:
+      - id: accept
+        text: "接受委托，开始修复"
+        actions: [{ type: flag.set, flag: mission_accepted }]
+        stats: { curiosity: 5 }
+        outcome: "你将神经接口连接到工作台，一段破碎的记忆洪流涌入意识……"
+        outcome_speaker: narrator
+      - id: investigate
+        text: "太可疑了，先调查发件人"
+        actions: [{ type: flag.set, flag: investigate_sender }]
+        stats: { independence: 5 }
+        outcome: "林晓追踪加密层，IP 路由指向新深圳织星塔附近——织星科技。"
+        outcome_speaker: lin_xiao
+
+  - id: dlg_office_repair_brief
+    scene: office
+    trigger: lin_xiao
+    stage: prep
+    pack: frame
+    title: "被剪掉的记忆"
+    atmosphere: "工作台的指示灯陆续亮起，记忆碎片在读取槽里发出轻微蜂鸣"
+    characters: [su_ran, lin_xiao]
+    prompt: "林晓说明了修复方案，你的决定是"
+    description: |
+      记忆碎片和神经接口都已找齐。林晓发现碎片不是自然损坏，缺失段被切得很整齐；
+      修复必须把两样东西一起接到办公室工作台。她提醒苏然，这段记忆可能与织女号事故
+      以及苏然自己被删除的过去有关。对白保持悬疑克制，推进到开始修复的决定。
+    choices:
+      - id: start
+        text: "现在开始修复"
+        actions: [{ type: flag.set, flag: mr_brief_done }]
+        stats: { curiosity: 4, independence: 2 }
+        outcome: "林晓把工作台预热到待接入状态。"
+        outcome_speaker: lin_xiao
+      - id: check
+        text: "先检查一遍工作台"
+        actions: [{ type: flag.set, flag: mr_brief_done }]
+        stats: { wisdom: 3 }
+        outcome: "你检查了接口触点，确认没有残留电荷。"
+        outcome_speaker: su_ran
+
+  - id: dlg_office_repair
+    scene: office
+    trigger: memory_repair_console
+    stage: prep
+    pack: frame
+    title: "记忆修复"
+    atmosphere: "工作台低鸣，神经接口的触点亮起冷光"
+    characters: [su_ran, lin_xiao]
+    minigame: connect
+    prompt: "记忆碎片已经拼合，是否接入神经接口继续修复"
+    description: |
+      苏然把记忆碎片和神经接口接到工作台，林晓在旁监控底层协议。碎片拼合后，
+      意识边缘闪过织女号白色走廊和被剪断的编号。继续同步接口会有神经刺痛，
+      但这是恢复缺失读取层的唯一办法。对白应体现修复过程的紧张与记忆闪回。
+    choices:
+      - id: connect
+        text: "接入神经接口，继续修复"
+        actions:
+          - { type: inventory.remove, itemId: memory_data, count: 1 }
+          - { type: inventory.remove, itemId: neural_interface, count: 1 }
+          - { type: flag.set, flag: memory_repair_done }
+        stats: { curiosity: 4, wisdom: 2 }
+        outcome: "记忆载波写入便携终端；数据还缺最后一层时间校准。"
+        outcome_speaker: lin_xiao
+
+  - id: dlg_office_repair_locked
+    scene: office
+    trigger: memory_repair_console
+    pack: frame
+    title: "未解锁的工作台"
+    atmosphere: "工作台的接口锁着，指示灯缓慢呼吸"
+    characters: [su_ran]
+    prompt: "工作台还没有解锁"
+    description: |
+      工作台缺少林晓的底层协议授权，现在还无法接入记忆碎片。
+      提示苏然先找林晓确认修复方案。
+    choices:
+      - id: ok
+        text: "先去问林晓"
+        outcome: "你转身去找林晓。"
+        outcome_speaker: narrator
+
+  - id: dlg_office_repair_done
+    scene: office
+    trigger: memory_repair_console
+    pack: frame
+    title: "工作台已冷却"
+    atmosphere: "工作台的指示灯已经熄灭，只剩下散热风扇的低鸣"
+    characters: [su_ran]
+    prompt: "工作台已经完成修复"
+    description: |
+      记忆载波已经写入便携终端，工作台空闲。提示苏然去天文实验室做时间校准。
+    choices:
+      - id: ok
+        text: "离开工作台"
+        outcome: "你带着便携终端离开工作台。"
+        outcome_speaker: narrator
+
+  - id: dlg_astro_memory_check
+    scene: astro
+    trigger: astro_scientist
+    pack: frame
+    title: "记忆时间校准"
+    atmosphere: "LISA 观测台，干涉记录在冷白屏幕上缓慢滚动"
+    characters: [su_ran, astro_scientist]
+    minigame: signal
+    prompt: "用 LISA 干涉记录校准记忆载波"
+    description: |
+      苏然带着修复后的记忆载波来到天文实验室，请研究员借用 LISA 干涉记录做时间基准。
+      载波与干涉条纹对齐后，时间戳指向织女号退役当天——这段记忆可能属于苏然自己。
+      研究员建议去 VR 回溯实验室做完整重建。对白应克制、专业，保留悬疑感。
+    choices:
+      - id: go_vr
+        text: "去 VR 实验室，把剩下的记忆拼完"
+        actions: [{ type: flag.set, flag: memory_check_done }]
+        stats: { curiosity: 3, wisdom: 2 }
+        outcome: "你把对齐后的载波写进便携终端。"
+        outcome_speaker: narrator
+
+  - id: dlg_vr_memory_repair
+    scene: vr
+    trigger: memory_repair_vr
+    pack: frame
+    title: "完整记忆重建"
+    atmosphere: "白色的记忆空间在 VR 舱内展开，走廊尽头有模糊的人影"
+    characters: [su_ran, lin_xiao]
+    minigame: find-clue
+    prompt: "在记忆空间里寻找被抹掉的细节"
+    description: |
+      记忆重建终端接入 VR 装置，苏然回到织女号的白色走廊，看到被删除前的自己
+      把一枚存储芯片藏进实验服。芯片编号指向十二名死者。记忆最后一层校验指向
+      1927 年索尔维会议——匿名委托真正想让她看的地方。对白应紧张、克制，
+      允许林晓通过通讯介入提醒时间戳漂移。
+    choices:
+      - id: exit
+        text: "记住这一切，退出记忆空间"
+        actions: [{ type: flag.set, flag: memory_fully_repaired }]
+        stats: { independence: 5, curiosity: 3 }
+        outcome: "记忆空间碎裂成光点，你带着完整的记忆回到现实。"
+        outcome_speaker: narrator
+
+  - id: dlg_vr_memory_locked
+    scene: vr
+    trigger: memory_repair_vr
+    pack: frame
+    title: "缺少时间基准"
+    atmosphere: "记忆重建终端闪烁着待校准的黄色指示灯"
+    characters: [su_ran]
+    prompt: "记忆重建终端尚未校准"
+    description: |
+      记忆重建终端缺少天文实验室的时间基准，无法开始完整重建。
+      提示苏然先去天文实验室完成校准。
+    choices:
+      - id: ok
+        text: "先去天文实验室"
+        outcome: "你记下提示，准备返回天文实验室。"
+        outcome_speaker: narrator
+
+  - id: dlg_vr_memory_done
+    scene: vr
+    trigger: memory_repair_vr
+    pack: frame
+    title: "记忆已归档"
+    atmosphere: "记忆重建终端的指示灯转为稳定的冷蓝"
+    characters: [su_ran]
+    prompt: "完整记忆已经归档"
+    description: |
+      完整的记忆已经留在苏然的意识里，无法再被删除。终端进入待机状态。
+    choices:
+      - id: ok
+        text: "离开终端"
+        outcome: "你离开记忆重建终端。"
+        outcome_speaker: narrator
+
+  - id: dlg_astro_scientist
+    scene: astro
+    trigger: astro_scientist
+    pack: frame
+    title: "引力波探测器导览"
+    atmosphere: "天文观测实验室，激光干涉仪低鸣，真空管路泛着冷光"
+    characters: [su_ran, astro_scientist]
+    prompt: "研究员向你介绍引力波探测器，你回应"
+    description: |
+      玩家受任务指引来到天文观测实验室，参观引力波探测器。主研究员温和热忱，
+      用激光干涉、时空涟漪、LIGO 与 LISA 等概念讲解探测器如何测量比原子还小的空间伸缩。
+      对白只围绕探测器与引力波展开，不要提及遗失的书籍或其他研究员的委托。
+    choices:
+      - id: ask_wave
+        text: "引力波到底是什么？"
+        stats: { curiosity: 5, wisdom: 3 }
+        outcome: "研究员从爱因斯坦的预言讲起，说到 2015 年 LIGO 第一次听到黑洞合并的回响。"
+        outcome_speaker: astro_scientist
+      - id: ask_detector
+        text: "这台探测器怎么工作？"
+        stats: { wisdom: 5 }
+        outcome: "研究员指着两条垂直的长臂：「引力波经过时，一条被拉长，另一条被压缩——我们要量出这点差别。」"
+        outcome_speaker: astro_scientist
+
+  - id: dlg_astro_lisa
+    scene: astro
+    trigger: astro_scientist_side
+    pack: frame
+    title: "LISA 光谱校准"
+    atmosphere: "LISA 观测台，激光干涉仪低鸣，控制台亮着冷白的光"
+    characters: [su_ran, astro_scientist_side]
+    excludes_flags: [lisa_calibration_done]
+    prompt: "研究员请你帮忙取校准底片，你回应"
+    description: |
+      侧面研究员正在为 LISA 观测台做光谱校准，需要一张留在观测台控制台上的光谱校准底片。
+      他请你去取回来，并提醒不要移动其他正在运行的镜组。对白只围绕校准底片和 LISA 观测台。
+    choices:
+      - id: fetch_spectrum
+        text: "我去观测台取底片"
+        stats: { curiosity: 3, wisdom: 2 }
+        outcome: "研究员点点头，把观测台控制台的位置指给你。"
+        outcome_speaker: astro_scientist_side
+      - id: ask_lisa
+        text: "先讲讲 LISA 在校准什么"
+        stats: { curiosity: 5 }
+        outcome: "研究员简要解释了激光干涉臂和皮米级测量。"
+        outcome_speaker: astro_scientist_side
+
+  - id: dlg_astro_lisa_done
+    scene: astro
+    trigger: astro_scientist_side
+    pack: frame
+    title: "校准完成之后"
+    atmosphere: "LISA 观测台恢复平稳，控制台读数归位"
+    characters: [su_ran, astro_scientist_side]
+    requires_flags: [lisa_calibration_done]
+    prompt: "校准已完成，你和研究员聊观测台的近况"
+    description: |
+      光谱校准底片已经交到侧面研究员手上，LISA 观测台重新进入稳定运行。
+      研究员对苏然表示感谢，可以聊观测台的数据、隔离区样本或接下来的调查。
+      不要再向苏然索要底片，也不要重复派发校准任务。
+    choices:
+      - id: ask_result
+        text: "校准结果怎么样"
+        stats: { curiosity: 2 }
+        outcome: "研究员说干涉条纹已经对齐，读数回到正常范围。"
+        outcome_speaker: astro_scientist_side
+      - id: say_goodbye
+        text: "那我先走了"
+        outcome: "研究员点头，目送你离开观测台。"
+        outcome_speaker: astro_scientist_side
+
+  - id: dlg_astro_book
+    scene: astro
+    trigger: astro_scientist_back
+    pack: frame
+    title: "遗失的《天体运行论》"
+    atmosphere: "天文观测实验室，隔离区门前，研究员神色焦急"
+    characters: [su_ran, astro_scientist_back]
+    prompt: "研究员请你帮忙找书，你回应"
+    description: |
+      研究员把一本哥白尼《天体运行论》（De Revolutionibus Orbium Coelestium）忘在了隔离区里，
+      但他没有四级门禁卡，进不去。他请你先去阿皮斯实验室找到门禁卡，再回隔离区东侧书架取书
+      （深红色皮装封面，很好认）。对白只围绕"找门禁卡、取书"这一件事展开，
+      不要提及会议、报告、辩论或其他人的委托。
+    choices:
+      - id: accept_book
+        text: "我去阿皮斯实验室找门禁卡"
+        actions: [{ type: flag.set, flag: astro_book_help }]
+        stats: { empathy: 5 }
+        outcome: "研究员连声道谢，把隔离区的位置和书的特征又仔细说了一遍。"
+        outcome_speaker: astro_scientist_back
+      - id: ask_where
+        text: "书放在隔离区哪里？"
+        stats: { curiosity: 5 }
+        outcome: "研究员说书在隔离区东侧的书架上，深红色皮装封面，一眼就能认出来。"
+        outcome_speaker: astro_scientist_back
+      - id: ask_why_book
+        text: "这本书为什么这么重要？"
+        stats: { wisdom: 3 }
+        outcome: "研究员说起哥白尼把地球从宇宙中心拉下来的故事，语气里带着敬意。"
+        outcome_speaker: astro_scientist_back
+
+  # ===== 索尔维会议主线 =====
+  - id: dlg_solvay_lorentz_commission
+    scene: solvay
+    trigger: solvay_lorentz
+    stage: prep
+    pack: solvay
+    minigame: archive-sort
+    title: "洛伦兹的委托"
+    atmosphere: "会议厅，会前忙碌，老派绅士的温和"
+    characters: [su_ran, solvay_lorentz]
+    prompt: "洛伦兹请你帮忙，你回应"
+    description: |
+      会议主席洛伦兹慈祥而疲惫，会议资料（座位安排表与科学家桌牌）散落在会场各处，
+      他请你这个年轻的记录员帮忙找回。对白应透露"这是我最后一次主持了"的感伤伏笔，
+      体现他作为新旧时代桥梁的温和公正。
+    choices:
+      - id: accept_commission
+        text: "交给我吧，洛伦兹先生"
+        actions: [{ type: flag.set, flag: lorentz_commission_accepted }]
+        stats: { lorentz好感度: 15, empathy: 5 }
+        outcome: "洛伦兹欣慰地笑了：「谢谢你，年轻人。会议可以顺利召开了。」"
+        outcome_speaker: solvay_lorentz
+      - id: ask_last_time
+        text: "您说'最后一次'……是什么意思？"
+        stats: { lorentz好感度: 10, wisdom: 5 }
+        outcome: "洛伦兹沉默片刻，望向空荡的会议厅：「有些时代，是要有人目送它落幕的。」"
+        outcome_speaker: solvay_lorentz
+
+  - id: dlg_solvay_de_broglie
+    scene: solvay
+    trigger: solvay_de_broglie
+    stage: debate1
+    pack: solvay
+    title: "从一个落点到一张图"
+    atmosphere: "茶歇走廊，阵营分化，德布罗意的孤独"
+    characters: [su_ran, solvay_de_broglie]
+    prompt: "面对被两大阵营忽视的德布罗意，你选择"
+    description: |
+      你把电子衍射累积图拿给德布罗意：单个落点是粒子，整体图样却是波——这正是他的物质波。
+      茶歇时人群已分成玻尔/海森堡的哥本哈根阵营与爱因斯坦/薛定谔的实在论阵营，
+      德布罗意独自站在角落。对白应呈现"第三条道路"的优雅与脆弱，推进到选边或关心他的抉择。
+    choices:
+      - id: side_copenhagen
+        text: "走向玻尔、海森堡那一组"
+        actions: [{ type: flag.set, flag: camp_copenhagen }]
+        stats: { copenhagen_affinity: 15, realism_affinity: -5 }
+        outcome: "海森堡热情地拉你加入讨论，泡利打量你一眼；爱因斯坦在远处微微点头，目光却有一丝失望。"
+        outcome_speaker: narrator
+      - id: side_realism
+        text: "走向爱因斯坦、薛定谔那一组"
+        actions: [{ type: flag.set, flag: camp_realism }]
+        stats: { copenhagen_affinity: -5, realism_affinity: 15 }
+        outcome: "爱因斯坦微笑着拍拍身边的椅子：「坐，年轻人。」海森堡在远处表情复杂。"
+        outcome_speaker: narrator
+      - id: sit_de_broglie
+        text: "坐到独自角落的德布罗意身边"
+        actions: [{ type: flag.set, flag: sat_with_de_broglie }, { type: flag.set, flag: camp_de_broglie }]
+        stats: { independence: 10, empathy: 10, de_broglie好感度: 15 }
+        outcome: "德布罗意惊讶而感激：「你……你愿意听我说说导航波？」"
+        outcome_speaker: solvay_de_broglie
+
+  - id: dlg_solvay_lorentz_report
+    scene: solvay
+    trigger: solvay_lorentz
+    stage: meeting
+    pack: solvay
+    title: "报告会"
+    atmosphere: "会议厅，报告即将开始，智识的紧张"
+    characters: [su_ran, solvay_lorentz, solvay_born, solvay_heisenberg]
+    prompt: "报告会开始，你的关注点"
+    description: |
+      洛伦兹主持，玻恩与海森堡的联合报告即将开始——量子力学与概率诠释。
+      爱因斯坦能坐在黑板前画下他的装置。对白应呈现三种诠释的正面碰撞与洛伦兹的引导。
+    choices:
+      - id: focus_probability
+        text: "专注玻恩的概率诠释"
+        stats: { copenhagen_affinity: 10, wisdom: 5 }
+        outcome: "玻恩温和地解释 |ψ|² 的意义——不是物理量的密度，而是概率幅。"
+        outcome_speaker: solvay_born
+      - id: focus_einstein
+        text: "留意爱因斯坦的反应"
+        stats: { realism_affinity: 8, einstein好感度: 8 }
+        outcome: "爱因斯坦在黑板上画下一个半球屏幕装置，全场安静——论战正式开始。"
+        outcome_speaker: narrator
+
+  - id: dlg_solvay_lorentz_report_cop
+    scene: solvay
+    trigger: solvay_lorentz
+    stage: meeting
+    pack: solvay
+    requires_flags: [camp_copenhagen]
+    title: "报告会（哥本哈根阵营）"
+    atmosphere: "会议厅，你与玻尔一系同席，报告即将开始"
+    characters: [su_ran, solvay_lorentz, solvay_born, solvay_heisenberg, solvay_bohr]
+    prompt: "作为哥本哈根一系的旁听者，你如何回应玻恩的报告"
+    description: |
+      你已站到玻尔、海森堡一侧。玻恩与海森堡的联合报告开始，概率诠释被推到台前。
+      海森堡不时看向你，期待你的呼应；爱因斯坦在黑板上画下装置。对白应体现你作为"同阵营"的立场，
+      让海森堡/玻尔对你的态度因站队而更亲近，同时埋下与实在论阵营的对立。
+    choices:
+      - id: cop_defend
+        text: "为概率诠释辩护：理论只描述可观测量"
+        stats: { copenhagen_affinity: 12, wisdom: 6 }
+        outcome: "海森堡向你点头，玻尔在远处投来赞许的目光。"
+        outcome_speaker: narrator
+      - id: cop_probe
+        text: "追问海森堡：不确定性是本体还是认识论"
+        stats: { wisdom: 10, independence: 5 }
+        outcome: "海森堡顿了顿，答得比平时更谨慎——你在替阵营问出最难的问题。"
+        outcome_speaker: solvay_heisenberg
+
+  - id: dlg_solvay_lorentz_report_real
+    scene: solvay
+    trigger: solvay_lorentz
+    stage: meeting
+    pack: solvay
+    requires_flags: [camp_realism]
+    title: "报告会（实在论阵营）"
+    atmosphere: "会议厅，你与爱因斯坦一系同席，报告即将开始"
+    characters: [su_ran, solvay_lorentz, solvay_born, solvay_heisenberg, solvay_einstein]
+    prompt: "作为实在论一系的旁听者，你如何回应玻恩的报告"
+    description: |
+      你已站到爱因斯坦、薛定谔一侧。玻恩与海森堡的报告把概率推到台前，你却盯着黑板上的装置。
+      爱因斯坦在纸上写着什么，薛定谔皱着眉。对白应体现你作为"反对派"的立场，
+      让爱因斯坦对你更信任，同时与玻尔一系形成张力。
+    choices:
+      - id: real_challenge
+        text: "当场质疑：概率是否只是我们无知的托词"
+        stats: { realism_affinity: 12, einstein好感度: 8 }
+        outcome: "爱因斯坦抬头看你，眼里第一次有了真正的兴趣。"
+        outcome_speaker: narrator
+      - id: real_probe
+        text: "低声问爱因斯坦：你打算怎么把装置摆上台"
+        stats: { wisdom: 8, einstein好感度: 10 }
+        outcome: "爱因斯坦把草图推到你面前，压低声音：「先别声张。」"
+        outcome_speaker: solvay_einstein
+
+  - id: dlg_solvay_lorentz_report_db
+    scene: solvay
+    trigger: solvay_lorentz
+    stage: meeting
+    pack: solvay
+    requires_flags: [camp_de_broglie]
+    title: "报告会（第三条道路）"
+    atmosphere: "会议厅，你与德布罗意同席，两派喧哗之外的安静"
+    characters: [su_ran, solvay_lorentz, solvay_born, solvay_heisenberg, solvay_de_broglie]
+    prompt: "两派论战时，你与德布罗意如何彼此呼应"
+    description: |
+      你选择站在德布罗意身边。报告开始后两派争论激烈，你们像被挤到边缘的观察者。
+      德布罗意的导航波既不属于哥本哈根也不属于实在论。对白应体现"第三条道路"的孤独与坚持，
+      让德布罗意把你视为罕见的同道，并埋下后续独立结局的伏笔。
+    choices:
+      - id: db_alien
+        text: "对德布罗意说：也许答案不在他们争的地方"
+        stats: { independence: 12, de_broglie好感度: 10 }
+        outcome: "德布罗意眼睛亮了一下，又很快黯淡——他知道这条路有多难。"
+        outcome_speaker: solvay_de_broglie
+      - id: db_observe
+        text: "安静记录两派的每一句交锋"
+        stats: { wisdom: 10, empathy: 5 }
+        outcome: "德布罗意看着你的笔记，轻声说：「你比他们更接近问题本身。」"
+        outcome_speaker: solvay_de_broglie
+
+  - id: dlg_solvay_bohr_report
+    scene: solvay
+    trigger: solvay_bohr
+    stage: finale
+    pack: solvay
+    title: "玻尔的应战"
+    atmosphere: "讲台，互补性的沉稳反击"
+    characters: [su_ran, solvay_bohr]
+    prompt: "听完玻尔对可回冲狭缝的回答，你"
+    description: |
+      玻尔走上讲台，用互补性原理正面化解爱因斯坦的可回冲狭缝挑战。
+      他语速缓慢而有力，喜欢用反问和类比。对白应体现哥本哈根诠释的内在逻辑与玻尔的深思。
+    choices:
+      - id: accept_complementarity
+        text: "被互补性说服"
+        stats: { copenhagen_affinity: 15, wisdom: 5 }
+        outcome: "玻尔目光温和而坚定：「波与粒子，是同一枚硬币的两面。」"
+        outcome_speaker: solvay_bohr
+      - id: question_bohr
+        text: "追问：观测究竟创造了什么？"
+        stats: { independence: 8, copenhagen_affinity: 5 }
+        outcome: "玻尔喃喃自语般沉吟：「我们不是自然的旁观者……我们是参与者。」"
+        outcome_speaker: solvay_bohr
+
+  - id: dlg_solvay_einstein_photon
+    scene: solvay
+    trigger: solvay_einstein
+    stage: finale
+    pack: solvay
+    final: true
+    title: "最终辩驳：光子箱"
+    atmosphere: "深夜会议厅，两台从未造出的装置，世纪之争的余韵"
+    characters: [su_ran, solvay_einstein]
+    prompt: "争论没有定论。面对上帝是否掷骰子，你最终的立场是"
+    description: |
+      爱因斯坦提出最后的光子箱思想实验，却被玻尔用他自己的广义相对论（引力钟差）击穿。
+      黑板上留下两台从未真正制造出的装置。深夜，爱因斯坦向你坦露"我不确定我能接受一个陌生的宇宙"。
+      这是核心立场的最终抉择——对白应把抽象哲学化为直觉可感的追问，推进到玩家的根本立场选择。
+    choices:
+      - id: cf_a
+        text: "接受不确定性——上帝掷骰子"
+        stats: { copenhagen_affinity: 20, wisdom: 5 }
+        outcome: "你不再需要确定性了。这不是放弃，而是解放——量子力学是我们与现实对话的方式。"
+        outcome_speaker: narrator
+      - id: cf_b
+        text: "坚守实在论——上帝不掷骰子"
+        stats: { realism_affinity: 20 }
+        outcome: "你选择相信爱因斯坦。世界应该是确定的、可理解的、美的——即使这意味着与主流对抗。"
+        outcome_speaker: narrator
+      - id: cf_c
+        text: "超越对立——与不确定性共处"
+        stats: { wisdom: 15, independence: 15, copenhagen_affinity: 5, realism_affinity: 5 }
+        outcome: "真正的收获不是答案，而是学会与不确定性共处——这恰是量子力学最深刻的一课。"
+        outcome_speaker: narrator
+      - id: cf_d
+        text: "记住洛伦兹——让对话成为可能"
+        stats: { lorentz好感度: 15, wisdom: 10, empathy: 10 }
+        outcome: "你想起洛伦兹的闭幕词：「我们是来理解彼此的。」让对话成为可能的人，比赢得对话的人更伟大。"
+        outcome_speaker: narrator
+
+  # ===== 索尔维支线 / 隐藏情感线 =====
+  - id: dlg_solvay_heisenberg_piano
+    scene: solvay
+    trigger: solvay_heisenberg
+    pack: solvay
+    title: "巴赫与困惑"
+    atmosphere: "深夜休息室，钢琴声，天才的脆弱"
+    characters: [su_ran, solvay_heisenberg]
+    prompt: "海森堡坦露伤痛，你回应"
+    description: |
+      深夜，海森堡弹着巴赫，坦露被玻尔批评的伤痛。白天才华横溢的年轻革命者，
+      此刻显露脆弱。对白应深化玩家与他的友谊，体现天才背后的自我怀疑。
+    choices:
+      - id: comfort
+        text: "安慰他，肯定他的贡献"
+        stats: { empathy: 10, copenhagen_affinity: 5 }
+        outcome: "海森堡停下琴声，目光锐利却柔和：「谢谢你……也许不确定性，也包括我自己。」"
+        outcome_speaker: solvay_heisenberg
+      - id: discuss_physics
+        text: "和他聊不确定性原理"
+        stats: { copenhagen_affinity: 8, wisdom: 5 }
+        outcome: "他直奔核心：「你不可能同时知道位置和速度——这不是测量缺陷，是自然的本性。」"
+        outcome_speaker: solvay_heisenberg
+
+  - id: dlg_solvay_curie
+    scene: solvay
+    trigger: solvay_curie
+    pack: solvay
+    title: "居里夫人的务实"
+    atmosphere: "公园散步，秋日梧桐，疲惫而坚定"
+    characters: [su_ran, solvay_curie]
+    prompt: "居里夫人问你，你回答"
+    description: |
+      玛丽·居里坚毅低调，关注科学的社会责任。她不喜欢闲聊，关心实际问题：
+      「我从不问它'为什么'衰变。」对白应体现实务智慧与对下一代科学家的关怀。
+    choices:
+      - id: ask_why
+        text: "追问放射性的'为什么'"
+        stats: { curiosity: 5 }
+        outcome: "居里夫人平和而直接：「我问的是'是什么'，以及'它能用来做什么'。」"
+        outcome_speaker: solvay_curie
+      - id: agree_pragmatic
+        text: "认同她的务实"
+        stats: { wisdom: 8, empathy: 5 }
+        outcome: "她目光中透着疲惫与坚定：「科学最终要回到人身上。」"
+        outcome_speaker: solvay_curie
+
+  - id: dlg_solvay_pauli
+    scene: solvay
+    trigger: solvay_pauli
+    pack: solvay
+    title: "泡利的一击"
+    atmosphere: "讨论厅，犀利审视，不容谬误"
+    characters: [su_ran, solvay_pauli]
+    prompt: "面对泡利的犀利，你"
+    description: |
+      泡利尖锐犀利、标准极高，被称为"物理学界的良知"。他用一个问题就能击溃导航波理论。
+      对白应展现学术争论的残酷与他对内在一致性的坚持。
+    choices:
+      - id: withstand
+        text: "接受他的批评并反驳"
+        stats: { independence: 8, wisdom: 5 }
+        outcome: "泡利目光犀利，却在你论证严密时给予高度赞赏：「嗯……这倒不是废话。」"
+        outcome_speaker: solvay_pauli
+      - id: concede
+        text: "承认他的指摘"
+        stats: { copenhagen_affinity: 5 }
+        outcome: "泡利冷哼一声：「至少你诚实。大多数人在这里只会狡辩。」"
+        outcome_speaker: solvay_pauli
+
+  - id: dlg_solvay_schrodinger
+    scene: solvay
+    trigger: solvay_schrodinger
+    pack: solvay
+    title: "薛定谔的波"
+    atmosphere: "走廊，诗意发散，哲学式的优雅"
+    characters: [su_ran, solvay_schrodinger]
+    prompt: "薛定谔谈起波动方程，你"
+    description: |
+      薛定谔博学多才、思维跳跃、富有诗意，想用波动方程统一量子现象，
+      却对概率诠释感到不安。对白应体现波动方程之美与他对实在论的眷恋。
+    choices:
+      - id: admire_wave
+        text: "赞叹波动方程之美"
+        stats: { realism_affinity: 8, wisdom: 5 }
+        outcome: "薛定谔富有感染力地说：「ψ 在空间里弥散，像一首连续的詩——怎能只是概率？」"
+        outcome_speaker: solvay_schrodinger
+      - id: ask_probability
+        text: "问他如何看待玻恩的概率诠释"
+        stats: { independence: 5, copenhagen_affinity: 3 }
+        outcome: "他叹了口气：「我的方程是对的……但它的意义，也许不属于我。」"
+        outcome_speaker: solvay_schrodinger
+
+  - id: dlg_solvay_born
+    scene: solvay
+    trigger: solvay_born
+    pack: solvay
+    title: "玻恩的概率"
+    atmosphere: "讨论厅，谦逊温和，幕后推手"
+    characters: [su_ran, solvay_born]
+    prompt: "玻恩谈起概率诠释，你"
+    description: |
+      马克斯·玻恩谦逊严谨、富有洞察力，首先指出波函数的物理意义是概率幅。
+      他善于肯定年轻人的贡献，强调合作。对白应体现哥本哈根阵营的幕后智慧。
+    choices:
+      - id: discuss_probability
+        text: "请教概率幅的含义"
+        stats: { copenhagen_affinity: 10, wisdom: 5 }
+        outcome: "玻恩温和而清晰：「|ψ|² 告诉你在哪里能找到粒子——不多，也不少。」"
+        outcome_speaker: solvay_born
+      - id: ask_collaboration
+        text: "问他与海森堡的合作"
+        stats: { empathy: 5, copenhagen_affinity: 5 }
+        outcome: "他目光温和深邃：「量子力学不是一个人的事业，是一代人的对话。」"
+        outcome_speaker: solvay_born

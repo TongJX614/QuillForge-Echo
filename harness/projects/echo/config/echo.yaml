@@ -1,0 +1,11 @@
+# ECHO 项目配置（被驱动项目自己的参数，不进引擎配置）
+#
+# 引擎侧的运行参数在 engine/quillforge/config/quillforge_config.yaml；
+# 这里只放 ECHO 玩法相关的东西。
+
+# 剧情内嵌小游戏
+minigame:
+  # 每个选项随机挂载小游戏的概率（0~1）；剧本显式声明 minigame 的选项不受此控制
+  choiceProbability: 0.8
+  # 注入时避开上一场景刚玩过的玩法，防止连续同类型
+  avoidRecentKind: true

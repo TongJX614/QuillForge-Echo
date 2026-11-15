@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import sys
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # ── Numba 线程安全：必须在 import rembg/numba 之前设置 ──
@@ -35,15 +36,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from logger import get_logger
 from config_manager import get_settings
+from registry import get_registry
 
 logger = get_logger("server")
+
+
+# ═══════════════════════════════════════════════════════
+# 已接入项目的子进程（由注册表声明，引擎不认识任何具体项目）
+# ═══════════════════════════════════════════════════════
+
+# main() 在真正监听前写入，供项目进程拿到引擎的实际端口
+_ACTUAL_PORT: int | None = None
+
+
+def _start_project_processes() -> None:
+    registry = get_registry()
+    for name in registry.process_names():
+        spec = registry.process(name)
+        if spec is None or not spec.autostart or spec.start is None:
+            continue
+        try:
+            spec.start(_ACTUAL_PORT)
+            logger.info("[registry] 已触发项目进程自启动: %s", name)
+        except Exception as exc:  # noqa: BLE001 - 项目进程失败不应拖垮引擎
+            logger.warning("[registry] 项目进程 %s 自启动失败: %s", name, exc)
+
+
+def _stop_project_processes() -> None:
+    registry = get_registry()
+    for name in registry.process_names():
+        spec = registry.process(name)
+        if spec is None or spec.stop is None:
+            continue
+        try:
+            spec.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[registry] 项目进程 %s 停止失败: %s", name, exc)
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    _start_project_processes()
+    try:
+        yield
+    finally:
+        _stop_project_processes()
 
 
 # ═══════════════════════════════════════════════════════
 # FastAPI App
 # ═══════════════════════════════════════════════════════
 
-app = FastAPI(title="QuillForge API", version="3.0.0")
+app = FastAPI(title="QuillForge API", version="3.0.0", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,11 +152,9 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="engine-stati
 # 与上游一致。
 # ═══════════════════════════════════════════════════════
 
-from registry import get_registry
 from routes.pages import serve_page_file
 
 _project_registry = get_registry()
-
 for _project_router in _project_registry.routers():
     app.include_router(_project_router)
 
@@ -149,6 +191,8 @@ def main():
     import argparse
     import uvicorn
 
+    global _ACTUAL_PORT
+
     settings = get_settings()
 
     parser = argparse.ArgumentParser(description="QuillForge Server")
@@ -162,6 +206,9 @@ def main():
 
     if not (args.api_key or settings.openai_api_key):
         logger.warning("[WARNING] 未设置 API Key")
+
+    # 项目进程的自启动钩子需要知道引擎实际监听的端口
+    _ACTUAL_PORT = args.port
 
     logger.info("服务地址: http://%s:%d", args.host, args.port)
     logger.info("API 文档: http://%s:%d/docs", args.host, args.port)
