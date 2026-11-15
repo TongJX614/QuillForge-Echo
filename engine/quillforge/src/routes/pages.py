@@ -66,4 +66,8 @@ def list_projects() -> dict:
             for c in registry.cards()
         ],
         "interludes": registry.interlude_names(),
+        "pageAssets": {
+            path: {"styles": list(a.styles), "scripts": list(a.scripts)}
+            for path, a in registry.page_assets().items()
+        },
     }

@@ -128,6 +128,7 @@
 .choice-btn:hover::before{opacity:.8;height:75%}
 .choice-btn:hover{background:rgba(197,162,101,.12);border-color:var(--accent);transform:translateX(4px)}
 .choice-btn .effect{font-size:12px;color:var(--muted);margin-top:4px}
+.choice-btn .interlude-badge{display:inline-block;margin-left:8px;font-size:11px;color:var(--warn);border:1px solid rgba(228,87,46,.4);border-radius:8px;padding:1px 8px;vertical-align:1px}
 .choice-btn.selected{background:rgba(107,158,122,.12);border-color:var(--success)}
 .waiting-msg{text-align:center;padding:20px;color:var(--success);font-size:14px;background:rgba(107,158,122,.06);border:1px dashed var(--success);border-radius:10px;margin-top:16px}
 .loading{display:flex;align-items:center;justify-content:center;padding:40px;gap:12px;color:var(--muted)}
@@ -245,6 +246,9 @@ function renderVNStage(progress = 0, sceneInfo = '生成中...') {
         <div class="vn-advance-hint" id="vnHint" style="display:none">点击继续 ▶</div>
       </div>
       <div class="vn-choices-overlay" id="vnChoices" style="display:none"></div>
+      <!-- 已接入项目的中断态浮层挂载点。引擎只提供容器与显隐，
+           内部的样式类与内容全部由项目脚本填充。 -->
+      <div id="interludeOverlay" style="display:none"></div>
       <div class="vn-narration-popup" id="vnNarrationPopup" style="display:none">
         <div class="vn-narration-card">
           <div class="vn-narration-text" id="vnNarrationText"></div>
@@ -1033,13 +1037,15 @@ function vnShowChoices() {
   if (sessionState === 'generated' && choices.length > 0 && chosenIndex < 0) {
     box.style.opacity = '0'; box.style.pointerEvents = 'none';
     overlay.style.display = 'flex';
-    overlay.innerHTML = `<div class="choices-label">做出你的选择</div>${choices.map((c, i) => `<button class="choice-btn" data-idx="${i}"><div>${escapeHtml(c.text)}</div><div class="effect">${escapeHtml(c.effect || c.description || c.hint || '')}</div></button>`).join('')}`;
+    overlay.innerHTML = `<div class="choices-label">做出你的选择</div>${choices.map((c, i) => `<button class="choice-btn" data-idx="${i}"><div>${escapeHtml(c.text)}${interludeBadge(c)}</div><div class="effect">${escapeHtml(c.effect || c.description || c.hint || '')}</div></button>`).join('')}`;
     overlay.addEventListener('click', e => {
       const btn = e.target.closest('.choice-btn');
       if (!btn) return;
       const idx = parseInt(btn.dataset.idx);
       const text = choices[idx]?.text || '';
       overlay.querySelectorAll('.choice-btn').forEach((b, i) => { if (i === idx) b.classList.add('selected'); b.style.pointerEvents = 'none'; });
+      // 声明了中断态的选项由已接入项目接管，引擎不参与其玩法
+      if (interludeTakeover(idx, choices[idx])) return;
       if (realtimeMode) realtimeChooseInVN(idx); else makeChoice(idx, text);
     });
   } else if (chosenIndex >= 0) {
@@ -1563,6 +1569,84 @@ async function init() {
 }
 
 init();
+// ═══════════════════════════════════════════════════════
+// 已接入项目的中断态挂载点
+//
+// 引擎不理解任何具体玩法：只暴露宿主能力，由项目脚本注册 detect/badge/start。
+// 未接入项目时 interludeImpl 为 null，选项渲染与点击行为与上游完全一致。
+// ═══════════════════════════════════════════════════════
+
+let interludeImpl = null;
+
+window.__qfHost = {
+  api,
+  escapeHtml,
+  generateSceneStream,
+  renderEnd,
+  get sessionId() { return sessionId; },
+  get chosenIndex() { return chosenIndex; },
+  setChosenIndex(v) { chosenIndex = v; },
+  overlay() { return document.getElementById('interludeOverlay'); },
+  choicesEl() { return document.getElementById('vnChoices'); },
+};
+
+window.__qfInterlude = {
+  register(impl) { interludeImpl = impl || null; },
+};
+
+function interludeBadge(choice) {
+  if (!interludeImpl || typeof interludeImpl.badge !== 'function') return '';
+  try {
+    const label = interludeImpl.badge(choice);
+    return label ? `<span class="interlude-badge">${escapeHtml(label)}</span>` : '';
+  } catch { return ''; }
+}
+
+function interludeTakeover(index, choice) {
+  if (!interludeImpl || typeof interludeImpl.start !== 'function') return false;
+  if (typeof interludeImpl.detect === 'function') {
+    let declared = false;
+    try { declared = !!interludeImpl.detect(choice); } catch { return false; }
+    if (!declared) return false;
+  }
+  try {
+    interludeImpl.start(index);
+  } catch (err) {
+    console.error('[interlude] 项目中断态启动失败', err);
+    return false;
+  }
+  return true;
+}
+
+// 载入已接入项目为 /game 页声明的样式与脚本
+(function loadProjectAssets() {
+  const onlyLocal = (u) => (typeof u === 'string' && u.startsWith('/') && !u.startsWith('//') ? u : '');
+  fetch('/api/projects', { headers: { Accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const assets = (data && data.pageAssets && data.pageAssets['/game']) || null;
+      if (!assets) return;
+      (assets.styles || []).map(onlyLocal).filter(Boolean).forEach((href) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        document.head.appendChild(link);
+      });
+      // 顺序加载，后一个脚本可依赖前一个注册的全局对象
+      (assets.scripts || []).map(onlyLocal).filter(Boolean).reduce(
+        (chain, src) => chain.then(() => new Promise((resolve) => {
+          const el = document.createElement('script');
+          el.src = src;
+          el.async = false;
+          el.onload = () => resolve();
+          el.onerror = () => resolve();
+          document.body.appendChild(el);
+        })),
+        Promise.resolve(),
+      );
+    })
+    .catch(() => { /* 取不到注册表就按无项目运行 */ });
+})();
 </script>
 </body>
 </html>

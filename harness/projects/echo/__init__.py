@@ -8,7 +8,15 @@
 
 from __future__ import annotations
 
-from registry import InterludeSpec, PageSpec, ProcessSpec, ProjectCard, ProjectDescriptor, StaticDirSpec
+from registry import (
+    InterludeSpec,
+    PageAssets,
+    PageSpec,
+    ProcessSpec,
+    ProjectCard,
+    ProjectDescriptor,
+    StaticDirSpec,
+)
 
 from . import echo_launcher, interlude
 from .routes import debate as debate_routes
@@ -92,6 +100,13 @@ def register(registry) -> None:
         resolve=interlude.resolve,
         cancel=interlude.cancel,
         on_scene_advance=interlude.on_scene_advance,
+    ))
+
+    # 引擎自带的 /game 页面：注入小游戏浮层的样式与玩法实现。
+    # 引擎只提供 #interludeOverlay 容器与 __qfHost/__qfInterlude 两个挂载点。
+    registry.register_page_assets(PROJECT_NAME, "/game", PageAssets(
+        styles=(f"{STATIC_URL_PREFIX}/game-interlude.css",),
+        scripts=(f"{STATIC_URL_PREFIX}/game-interlude.js",),
     ))
 
     registry.register_process(PROJECT_NAME, ProcessSpec(

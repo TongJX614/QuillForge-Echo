@@ -156,7 +156,7 @@ if (!existsSync(join(root, '.venv'))) {
     console.log('  ok   独立模式首页与文档可达');
 
     const projects = await (await fetch(`http://127.0.0.1:${ENGINE_PORT}/api/projects`)).json();
-    assert.deepEqual(projects, { projects: [], cards: [], interludes: [] });
+    assert.deepEqual(projects, { projects: [], cards: [], interludes: [], pageAssets: {} });
     passed += 1;
     console.log('  ok   独立模式注册表为空');
 
@@ -205,10 +205,15 @@ if (!existsSync(join(root, '.venv'))) {
     assert.deepEqual(projects.projects.map((p) => p.name), ['echo']);
     assert.deepEqual(projects.interludes, ['minigame']);
     assert.equal(projects.cards.length, 1);
+    assert.deepEqual(projects.pageAssets['/game'], {
+      styles: ['/echo/static/game-interlude.css'],
+      scripts: ['/echo/static/game-interlude.js'],
+    });
     passed += 1;
-    console.log('  ok   注册表接入 echo，含 minigame 中断态与世界编织卡片');
+    console.log('  ok   注册表接入 echo，含 minigame 中断态、世界编织卡片与 /game 资源注入');
 
-    for (const path of ['/debate', '/minigame', '/weave/', '/echo/static/echo-embed-bridge.js', '/api/echo/beats']) {
+    for (const path of ['/debate', '/minigame', '/weave/', '/echo/static/echo-embed-bridge.js',
+      '/echo/static/game-interlude.css', '/echo/static/game-interlude.js', '/api/echo/beats']) {
       const response = await fetch(`http://127.0.0.1:${FUSION_PORT}${path}`);
       assert.equal(response.status, 200, `${path} 返回 ${response.status}`);
     }

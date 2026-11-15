@@ -1,0 +1,138 @@
+/* ECHO 剧情小游戏浮层样式，注入引擎 /game 页的 #interludeOverlay 容器。
+   引擎只提供容器与显隐，主题与控件样式全在这里。 */
+/* 内嵌小游戏浮层：调查桌主题（墨青桌面 + 纸色证物卡 + 朱红印章） */
+.vn-minigame-overlay{--mg-ink:#101826;--mg-panel:#182234;--mg-line:#2e3d55;--mg-paper:#f2ead9;--mg-paper-dim:#e5d9bc;--mg-verm:#e4572e;--mg-sepia:#2b2620;--mg-sepia-mut:#7a6f5d;--mg-signal:#6fa8a0;--mg-display:'ZCOOL QingKe HuangYou','Noto Sans SC','Microsoft YaHei',sans-serif;position:absolute;inset:0;z-index:38;background:rgba(9,13,22,.93);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);font-family:'Noto Sans SC','Microsoft YaHei','PingFang SC',sans-serif}
+.mg-panel{position:relative;width:min(92%,720px);max-height:88vh;overflow-y:auto;background:var(--mg-panel);border:1px solid var(--mg-line);border-radius:4px;padding:34px 28px 26px;scrollbar-width:thin;scrollbar-color:var(--mg-line) transparent;background-image:linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px);background-size:100% 28px}
+.mg-folder-tab{position:absolute;top:0;left:24px;background:var(--mg-paper-dim);color:#5c4f33;font-size:11px;font-weight:700;letter-spacing:3px;padding:3px 16px;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.mg-eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:3px;color:var(--mg-signal);margin-bottom:6px}
+.mg-title{font-family:var(--mg-display);font-size:26px;color:var(--mg-paper);letter-spacing:3px;margin-bottom:10px;font-weight:400}
+.mg-sub{font-size:13px;color:#93a1b8;line-height:1.8;margin-bottom:14px}
+.mg-banner{background:rgba(242,234,217,.06);border-left:3px solid var(--mg-verm);padding:12px 16px;border-radius:0 4px 4px 0;font-size:15px;line-height:1.7;margin-bottom:16px;color:#e9e2d2}
+.mg-hint{color:var(--mg-signal);font-size:13px;margin:12px 0 0;line-height:1.7}
+.mg-tip{font-size:12px;color:#93a1b8;margin-bottom:12px;line-height:1.7}
+.mg-clue-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.mg-clue{position:relative;background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:16px 14px 13px;cursor:pointer;transition:transform .15s,box-shadow .15s;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.mg-clue:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.45)}
+.mg-clue.selected{outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-clue.selected::after{content:'指認';position:absolute;right:8px;top:50%;transform:translateY(-50%) rotate(-14deg);border:2px solid var(--mg-verm);color:var(--mg-verm);padding:2px 8px;font-size:13px;letter-spacing:4px;opacity:.9;pointer-events:none;animation:mgStampIn .22s ease-out}
+.mg-clue .src{font-size:12px;color:var(--mg-sepia-mut);margin-bottom:5px;border-bottom:1px dashed rgba(43,38,32,.25);padding-bottom:5px}
+.mg-clue .txt{font-size:13px;line-height:1.7}
+.mg-clue .mg-tag{position:absolute;top:-9px;left:10px;background:var(--mg-sepia);color:var(--mg-paper);font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:2px 8px;border-radius:2px}
+.mg-cipher{font-family:var(--font-mono);font-size:24px;letter-spacing:4px;text-align:center;padding:22px 12px;background:rgba(6,10,18,.5);border:1px dashed var(--mg-signal);border-radius:4px;color:var(--mg-signal);margin:4px 0 14px;word-break:break-all;line-height:1.6}
+.mg-input{width:100%;padding:12px 14px;font-size:16px;letter-spacing:2px;background:rgba(6,10,18,.5);border:1px solid var(--mg-line);border-radius:4px;color:var(--mg-paper);outline:none;margin-bottom:14px}
+.mg-input:focus{border-color:var(--mg-verm)}
+.mg-list{display:flex;flex-direction:column;gap:9px;margin-bottom:14px}
+.mg-item{display:flex;align-items:center;gap:11px;background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:11px 14px;cursor:grab;transition:transform .15s,outline-color .15s,opacity .15s;user-select:none;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.mg-item:hover{transform:translateX(3px)}
+.mg-item.dragging{opacity:.45}
+.mg-item.dragover{outline:2px dashed var(--mg-verm);outline-offset:2px}
+.mg-item.selected{outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-item .num{min-width:24px;height:24px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:var(--mg-paper);background:var(--mg-sepia);flex-shrink:0;font-family:var(--font-mono)}
+.mg-item .txt{font-size:13px;line-height:1.6}
+/* 连线配对：左右两栏 + 同号徽章表示连线 */
+.mg-match{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:12px 34px;margin-bottom:14px}
+.mg-match-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+.mg-match-col{display:flex;flex-direction:column;gap:10px}
+.mg-match-item{position:relative;background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:10px 14px;font-size:13px;line-height:1.6;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .15s}
+.mg-match-item:hover{transform:translateY(-2px)}
+.mg-match-item.selected{outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-match-item .pair-no{position:absolute;top:-8px;right:8px;min-width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff8f2;font-family:var(--font-mono)}
+/* 证物归类：待分盘 + 分类箱 */
+.mg-class-tray{display:flex;flex-wrap:wrap;gap:9px;min-height:46px;background:rgba(6,10,18,.35);border:1px dashed var(--mg-line);border-radius:4px;padding:10px;margin-bottom:14px}
+.mg-class-item{background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:8px 12px;font-size:13px;line-height:1.5;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,.3);transition:transform .15s}
+.mg-class-item:hover{transform:translateY(-2px)}
+.mg-class-item.selected{outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-class-bins{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.mg-class-bin{background:rgba(242,234,217,.05);border:1px solid var(--mg-line);border-radius:4px;min-height:92px;padding:10px;cursor:pointer;transition:border-color .15s,background .15s}
+.mg-class-bin:hover{border-color:var(--mg-signal)}
+.mg-class-bin .bin-name{font-size:13px;letter-spacing:2px;color:var(--mg-signal);border-bottom:1px dashed var(--mg-line);padding-bottom:7px;margin-bottom:8px}
+.mg-class-bin .bin-items{display:flex;flex-direction:column;gap:7px}
+/* 逐步解锁：层数进度 + 选项 */
+.mg-unlock-progress{display:flex;gap:6px;justify-content:center;margin-bottom:16px}
+.mg-unlock-progress .seg{width:36px;height:5px;background:var(--mg-line);border-radius:2px}
+.mg-unlock-progress .seg.done{background:var(--mg-verm)}
+.mg-unlock-progress .seg.cur{background:var(--mg-signal)}
+.mg-unlock-prompt{font-size:16px;line-height:1.7;color:#e9e2d2;text-align:center;margin-bottom:16px}
+.mg-unlock-opts{display:flex;flex-direction:column;gap:9px;margin-bottom:14px}
+.mg-unlock-opt{background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:12px 16px;font-size:14px;cursor:pointer;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .15s}
+.mg-unlock-opt:hover{transform:translateY(-2px);outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-unlock-opt.ok{outline:2px solid var(--mg-signal);outline-offset:2px;background:#e8ead8}
+.mg-unlock-opt.bad{outline:2px solid var(--mg-verm);outline-offset:2px;opacity:.55;cursor:not-allowed}
+.mg-unlock-opt.busy{pointer-events:none;opacity:.7}
+.mg-unlock-hint{margin:4px 0 12px;padding:8px 12px;border-left:3px solid var(--mg-signal);font-size:13px;line-height:1.6;color:var(--mg-signal)}
+.mg-archive{margin:14px 0;padding:14px 16px;border:1px dashed var(--mg-line);background:rgba(228,87,46,.06);text-align:left}
+.mg-archive-title{font-size:13px;letter-spacing:.14em;color:var(--mg-verm);margin-bottom:8px;font-family:var(--font-mono)}
+.mg-archive-content{font-size:13.5px;line-height:1.9;color:#e9e2d2;white-space:pre-wrap}
+/* 巡航收集：HUD + 画布 */
+.mg-voyage-hud{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:13px;color:var(--mg-signal);margin-bottom:8px}
+.mg-voyage-canvas{width:100%;height:320px;background:linear-gradient(rgba(6,10,18,.6),rgba(12,22,38,.92));border:1px solid var(--mg-line);border-radius:4px;display:block;touch-action:none}
+/* 碎纸复原：调查台拼盘 */
+.mg-shred-doc{text-align:center;font-family:var(--mg-display);font-size:15px;letter-spacing:3px;color:#d9a441;margin-bottom:12px}
+.mg-shred-grid{display:grid;gap:8px;margin-bottom:14px}
+.mg-shred-tile{position:relative;background:var(--mg-paper);color:var(--mg-sepia);border-radius:6px 10px 5px 12px/10px 5px 12px 6px;min-height:70px;padding:9px 11px;font-size:12.5px;line-height:1.6;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .15s,background .15s;display:flex;align-items:center;justify-content:center;text-align:center;user-select:none}
+.mg-shred-tile:hover{transform:translateY(-2px)}
+.mg-shred-tile.selected{background:#fbe3d6;box-shadow:0 0 0 2px var(--mg-verm),0 4px 10px rgba(0,0,0,.35);transform:scale(1.03)}
+/* 频段截听：示波器 + 调频旋钮 */
+.mg-radio-hud{display:flex;justify-content:space-between;gap:10px;font-family:var(--font-mono);font-size:13px;color:var(--mg-signal);margin-bottom:8px;flex-wrap:wrap}
+.mg-radio-scope{width:100%;height:210px;display:block;border:1px solid var(--mg-line);border-radius:4px;background:linear-gradient(rgba(6,10,18,.7),rgba(10,18,30,.92));margin-bottom:10px}
+.mg-radio-freq{text-align:center;font-family:var(--font-mono);font-size:21px;color:var(--mg-paper);letter-spacing:2px;margin-bottom:4px}
+.mg-radio-freq em{color:var(--mg-verm);font-style:normal}
+.mg-radio-dial{width:100%;accent-color:var(--mg-verm);cursor:pointer;margin-bottom:8px}
+.mg-radio-lockbar{height:8px;background:rgba(6,10,18,.5);border:1px solid var(--mg-line);border-radius:4px;overflow:hidden;margin-bottom:4px}
+.mg-radio-lockbar .fill{height:100%;width:0%;background:linear-gradient(90deg,var(--mg-signal),#7cb98a)}
+/* 现场搜证：证物陈列架 */
+.mg-search-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:14px}
+.mg-search-item{position:relative;background:var(--mg-paper);color:var(--mg-sepia);border-radius:2px;padding:11px 9px 9px;cursor:pointer;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .15s;user-select:none}
+.mg-search-item:hover{transform:translateY(-2px)}
+.mg-search-item.picked{outline:2px solid var(--mg-verm);outline-offset:2px}
+.mg-search-item.picked::after{content:'圈选';position:absolute;right:5px;top:5px;border:1px solid var(--mg-verm);color:var(--mg-verm);font-size:10px;padding:1px 5px;letter-spacing:2px;transform:rotate(6deg);background:rgba(255,248,242,.85)}
+.mg-search-item .nm{font-size:13px;font-weight:600;margin-bottom:3px}
+.mg-search-item .ds{font-size:11px;color:var(--mg-sepia-mut);line-height:1.5}
+/* 密码转盘：拨轮 + 试拨记录 */
+.mg-dial-locknote{font-size:12px;color:var(--mg-sepia-mut);font-style:italic;margin:4px 0 10px}
+.mg-dial-slots{display:flex;justify-content:center;gap:12px;margin:14px 0 6px}
+.mg-dial-slot{width:58px;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;background:rgba(6,10,18,.55);border:1px solid var(--mg-line);border-radius:5px;padding:4px 0}
+.mg-dial-slot .digit{font-family:monospace;font-size:30px;color:var(--mg-paper);line-height:1.4}
+.mg-dial-slot .spin button{width:40px;height:20px;font-size:11px;line-height:1;cursor:pointer;background:rgba(255,255,255,.06);color:var(--mg-sepia-mut);border:1px solid var(--mg-line);border-radius:3px;margin:1px 0}
+.mg-dial-slot .spin button:hover{color:var(--mg-verm);border-color:var(--mg-verm)}
+.mg-dial-history{margin-top:12px;border-top:1px dashed var(--mg-line);padding-top:8px;max-height:120px;overflow-y:auto}
+.mg-dial-history .dh-title{font-size:11px;color:var(--mg-sepia-mut);margin-bottom:4px}
+.mg-dial-row{display:flex;justify-content:space-between;align-items:center;font-family:monospace;font-size:13px;padding:3px 8px;border-bottom:1px solid rgba(0,0,0,.06)}
+.mg-dial-row .guess{letter-spacing:6px;color:var(--mg-sepia)}
+.mg-dial-row .fb{color:var(--mg-sepia-mut);font-size:12px}
+.mg-dial-row .fb em{color:var(--mg-verm);font-style:normal}
+.mg-dial-fmterror{color:var(--mg-verm);font-size:12px;text-align:center;min-height:16px;margin-top:4px}
+/* 档案室迷宫：网格 + 方向键 */
+.mg-maze-hud{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--mg-sepia-mut);margin-bottom:6px}
+.mg-maze-wrap{position:relative;width:min(80vw,320px);margin:0 auto;aspect-ratio:1}
+.mg-maze-grid{display:grid;width:100%;height:100%;border:1px solid var(--mg-line)}
+.mg-maze-cell{background:rgba(6,10,18,.85)}
+.mg-maze-cell.open{background:rgba(232,224,206,.16)}
+.mg-maze-cell.exit{background:rgba(124,185,138,.3);box-shadow:inset 0 0 0 1px #7cb98a}
+.mg-maze-patrol{position:absolute;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;background:radial-gradient(circle,rgba(255,196,64,.95) 0%,rgba(255,176,32,.55) 55%,rgba(255,176,32,0) 100%);box-shadow:0 0 10px rgba(255,176,32,.8);z-index:2}
+.mg-maze-grid.caught{outline:2px solid var(--mg-verm);outline-offset:-2px}
+.mg-maze-cell.player{background:var(--mg-verm);border-radius:2px}
+.mg-maze-dpad{display:grid;grid-template-columns:repeat(3,46px);grid-template-rows:repeat(2,36px);gap:5px;justify-content:center;margin-top:12px}
+.mg-maze-dpad button{font-size:15px;cursor:pointer;background:rgba(255,255,255,.06);color:var(--mg-sepia-mut);border:1px solid var(--mg-line);border-radius:4px}
+.mg-maze-dpad button:hover{color:var(--mg-verm);border-color:var(--mg-verm)}
+.mg-maze-dpad button[data-dir="up"]{grid-column:2}
+.mg-maze-dpad button[data-dir="left"]{grid-column:1;grid-row:2}
+.mg-maze-dpad button[data-dir="down"]{grid-column:2;grid-row:2}
+.mg-maze-dpad button[data-dir="right"]{grid-column:3;grid-row:2}
+.mg-actions{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+.mg-btn{padding:10px 22px;border:1px solid var(--mg-verm);background:transparent;color:var(--mg-verm);font-size:14px;cursor:pointer;border-radius:2px;transition:all .18s;letter-spacing:2px}
+.mg-btn:hover:not(:disabled){background:var(--mg-verm);color:#fff8f2}
+.mg-btn:focus-visible{outline:2px solid var(--mg-paper);outline-offset:2px}
+.mg-btn.ghost{border-color:var(--mg-line);color:#93a1b8}
+.mg-btn.ghost:hover:not(:disabled){background:transparent;color:var(--mg-paper);border-color:#93a1b8}
+.mg-btn:disabled{opacity:.4;cursor:not-allowed}
+.mg-stamp{width:max-content;margin:0 auto 16px;border:3px solid currentColor;outline:1px solid currentColor;outline-offset:3px;padding:8px 22px;font-family:var(--mg-display);font-size:28px;letter-spacing:8px;transform:rotate(-7deg);animation:mgStampIn .28s ease-out;text-align:center}
+.mg-stamp.ok{color:#7cb98a}
+.mg-stamp.bad{color:#e0654f}
+.mg-stamp.warn{color:#d9a441}
+@keyframes mgStampIn{from{transform:rotate(-7deg) scale(1.7);opacity:0}to{transform:rotate(-7deg) scale(1);opacity:1}}
+.mg-result-title{font-size:16px;text-align:center;letter-spacing:4px;margin-bottom:12px;color:#93a1b8}
+.mg-result-text{font-size:14px;line-height:1.9;text-align:center;color:#e9e2d2;margin-bottom:8px}
+.mg-correct{font-size:13px;color:var(--mg-signal);text-align:center;margin-bottom:8px;line-height:1.7}
+@media(max-width:640px){.mg-clue-grid{grid-template-columns:1fr}.mg-panel{padding:30px 18px 20px}.mg-title{font-size:20px}.mg-stamp{font-size:21px;letter-spacing:5px}.mg-match{gap:10px 14px}.mg-voyage-canvas{height:260px}.mg-search-grid{grid-template-columns:repeat(2,1fr)}.mg-radio-scope{height:170px}}
+@media(prefers-reduced-motion:reduce){.mg-stamp,.mg-stamp-mark{animation:none}.mg-clue,.mg-item,.mg-btn{transition:none}}

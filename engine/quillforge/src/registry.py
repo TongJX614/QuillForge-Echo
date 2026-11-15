@@ -64,6 +64,14 @@ class ProjectCard:
 
 
 @dataclass(frozen=True)
+class PageAssets:
+    """项目要为引擎某个自带页面注入的样式与脚本（按序加载）。"""
+
+    styles: tuple = ()
+    scripts: tuple = ()
+
+
+@dataclass(frozen=True)
 class InterludeSpec:
     """会话中断态。
 
@@ -116,6 +124,7 @@ class ProjectRegistry:
         self._pages: list[PageSpec] = []
         self._static_dirs: list[StaticDirSpec] = []
         self._cards: list[ProjectCard] = []
+        self._page_assets: dict[str, PageAssets] = {}
         self._interludes: dict[str, InterludeSpec] = {}
         self._processes: dict[str, ProcessSpec] = {}
 
@@ -139,6 +148,16 @@ class ProjectRegistry:
 
     def register_card(self, project: str, card: ProjectCard) -> None:
         self._cards.append(card)
+
+    def register_page_assets(self, project: str, page_path: str, assets: PageAssets) -> None:
+        existing = self._page_assets.get(page_path)
+        if existing is None:
+            self._page_assets[page_path] = assets
+        else:
+            self._page_assets[page_path] = PageAssets(
+                styles=tuple(existing.styles) + tuple(assets.styles),
+                scripts=tuple(existing.scripts) + tuple(assets.scripts),
+            )
 
     def register_interlude(self, project: str, spec: InterludeSpec) -> None:
         if spec.name in self._interludes:
@@ -173,6 +192,9 @@ class ProjectRegistry:
 
     def cards(self) -> list[ProjectCard]:
         return list(self._cards)
+
+    def page_assets(self) -> dict[str, PageAssets]:
+        return dict(self._page_assets)
 
     def interlude(self, name: str) -> Optional[InterludeSpec]:
         return self._interludes.get(name)
