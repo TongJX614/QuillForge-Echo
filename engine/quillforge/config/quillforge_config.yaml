@@ -1,0 +1,68 @@
+# QuillForge 运行参数配置
+# 控制 Harness 各阶段的行为参数
+
+quillforge:
+  version: "3.2.0"
+  name: "QuillForge"
+
+  # LLM 配置
+  llm:
+    # DeepSeek API（OpenAI 兼容格式）
+    apiBase: "https://api.deepseek.com"
+    model: "deepseek-v4-flash"
+    temperature: 0.8
+    maxTokens: 4000
+    timeout: 90000  # 毫秒（代码读取时 ≥1000 按毫秒换算为秒）
+
+  # Pipeline 阶段配置
+  stages:
+    contextAssembly:
+      # Stage 1 无 LLM 调用，纯数据处理
+      enabled: true
+
+    narrativeAnchoring:
+      enabled: true
+      promptTemplate: "prompts/narration_v2.md"
+      narrationLength:
+        short: [50, 150]    # 字数范围
+        medium: [100, 300]
+        long: [200, 500]
+
+    dialogueGeneration:
+      enabled: true
+      promptTemplate: "prompts/dialogue_v2.md"
+      dialogueCount:
+        min: 3
+        max: 15
+        default: 4
+
+    choiceBranching:
+      enabled: true
+      promptTemplate: "prompts/choices_v2.md"
+      choiceCount:
+        min: 2
+        max: 4
+        default: 3
+
+    validationGate:
+      enabled: true
+      maxRetries: 2
+      # 验证阈值（与 NarrativeValidator 默认值一致；调高会显著增加重试概率）
+      thresholds:
+        personalityMatchScore: 0.5  # 性格匹配度最低分
+        personalitySeverity: "high"  # 性格匹配失败级别：high=阻塞并重试，medium=仅提示
+        personalityJudge: true  # 性格词表零命中时改用 LLM 评审打分（会新增一次 LLM 调用）
+        worldlineAdherenceScore: 0.12  # 主线符合度最低分
+        worldlineAdherenceScoreFinal: 0.08  # 终局场景主线符合度最低分
+      judgeMaxTokens: 300  # LLM 性格评审的单次输出上限
+
+  # 续写配置
+  continuation:
+    maxHistoryRounds: 3  # 最多携带最近 N 轮历史上下文
+    contextWindowStrategy: "sliding"  # sliding | summary
+
+  # 日志
+  logging:
+    level: "info"  # debug | info | warn | error
+    logPrompts: true  # 是否记录完整 prompt
+    logResponses: true

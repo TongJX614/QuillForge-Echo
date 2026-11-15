@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables (敏感信息)
+.env
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+.qoder/
+*.swp
+*.swo
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Vercel 临时文件
+.vercel-tmp/
+
+# 上传的剧本文件
+quillforge/uploads/
+
+# 生成的图片
+quillforge/generated_images/
+
+# 生成的音频
+quillforge/generated_audio/
+
+# 截图和临时图片
+*.png
+!docs/*.png
+
+# 临时测试文件
+quillforge/_*.py
+quillforge/_*.json
+quillforge/_*.txt
+quillforge/tests/_*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

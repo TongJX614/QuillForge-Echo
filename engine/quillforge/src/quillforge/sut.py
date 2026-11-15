@@ -1,0 +1,273 @@
+# -*- coding: utf-8 -*-
+"""
+System Under Test (SUT) — 被测系统的隔离封装
+
+SUT = LLM 客户端 + Prompt 模板加载/渲染
+Harness 编排器通过 SUT 接口调用 LLM，不直接接触 LLM 客户端或 Prompt 模板。
+这样可以替换 SUT（如换 LLM 服务商、换 Prompt 策略）而不影响 Harness 编排逻辑。
+
+LLM 客户端已统一至 llm_client.py，本模块仅保留：
+  - load_config / load_prompt / render_template 函数
+  - NarrativeSUT 类（Prompt 渲染 + LLM 调用委托）
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+from typing import Generator
+
+import yaml
+
+# 确保 src/ 在 sys.path 中
+_SRC_DIR = str(Path(__file__).resolve().parent.parent)
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
+from llm_client import LLMClient  # noqa: E402
+from logger import get_logger  # noqa: E402
+
+logger = get_logger("harness.sut")
+
+# 项目路径
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # quillforge/
+PROMPTS_DIR = PROJECT_ROOT / "prompts"
+CONFIG_DIR = PROJECT_ROOT / "config"
+
+
+# ═══════════════════════════════════════════════════════
+# 配置与 Prompt 加载（模块级函数）
+# ═══════════════════════════════════════════════════════
+
+def load_config() -> dict:
+    """加载 quillforge_config.yaml"""
+    config_path = CONFIG_DIR / "quillforge_config.yaml"
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    return {}
+
+
+def load_prompt(filename: str) -> str:
+    """加载 Prompt 模板文件"""
+    path = PROMPTS_DIR / filename
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def render_template(template: str, variables: dict) -> str:
+    """
+    简单的模板变量替换
+    支持 {{variable}} 和 {{#if var}}...{{/if}} 和 {{#each arr}}...{{/each}}
+    """
+    result = template
+
+    # 处理 {{#if var}}...{{#else}}...{{/if}}
+    def replace_if(match):
+        var_name = match.group(1).strip()
+        then_block = match.group(2)
+        else_block = match.group(3) if match.group(3) is not None else ""
+        if variables.get(var_name):
+            return then_block
+        return else_block
+
+    result = re.sub(
+        r'\{\{#if\s+(\w+)\}\}(.*?)(?:\{\{#else\}\}(.*?))?\{\{/if\}\}',
+        replace_if,
+        result,
+        flags=re.DOTALL,
+    )
+
+    # 处理 {{#each arr}}...{{/each}}
+    def replace_each(match):
+        var_name = match.group(1).strip()
+        block = match.group(2)
+        items = variables.get(var_name, [])
+        parts = []
+        for item in items:
+            rendered = block
+            # 统一转为 dict 处理，支持 dict / dataclass / 普通对象
+            if isinstance(item, dict):
+                item_dict = item
+            elif hasattr(item, 'to_dict'):
+                item_dict = item.to_dict()
+            elif hasattr(item, '__dataclass_fields__'):
+                item_dict = {k: getattr(item, k, '') for k in item.__dataclass_fields__}
+            else:
+                rendered = rendered.replace("{{this}}", str(item))
+                parts.append(rendered)
+                continue
+            # 用 dict 的键值替换模板变量
+            for k, v in item_dict.items():
+                rendered = rendered.replace(f"{{{{this.{k}}}}}", str(v))
+            # 清理空值行：删除只包含标签但值为空的行
+            rendered = re.sub(r'(?m)^[\s]*[^{]*\{\{this\.\w+\}\}.*$', '', rendered)
+            # 清理标签已替换但值为空的行（如 "  动机：\n" 或 "- 秘密：\n"）
+            rendered = re.sub(r'(?m)^[\s]*[-•]?\s*[^：:\n]+[：:]\s*$', '', rendered)
+            # 清理连续空行
+            rendered = re.sub(r'\n{3,}', '\n\n', rendered)
+            parts.append(rendered)
+        return "\n".join(parts)
+
+    result = re.sub(
+        r'\{\{#each\s+(\w+)\}\}(.*?)\{\{/each\}\}',
+        replace_each,
+        result,
+        flags=re.DOTALL,
+    )
+
+    # 处理简单变量 {{variable}}
+    for key, value in variables.items():
+        if isinstance(value, (str, int, float, bool)):
+            result = result.replace(f"{{{{{key}}}}}", str(value))
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# LLM 客户端（已迁移至 llm_client.py，此处保留向后兼容导入）
+# ═══════════════════════════════════════════════════════
+# from llm_client import LLMClient  — 已在文件顶部导入
+
+
+# ═══════════════════════════════════════════════════════
+# SUT — System Under Test
+# ═══════════════════════════════════════════════════════
+
+class NarrativeSUT:
+    """
+    System Under Test：封装 LLM 客户端 + Prompt 模板加载/渲染。
+
+    Harness 编排器通过 SUT 接口调用 LLM，实现：
+    - SUT 可替换（换 LLM 服务商、换 Prompt 策略）
+    - Prompt 模板统一管理
+    - 系统提示词渲染逻辑集中
+    """
+
+    def __init__(self, config: dict | None = None):
+        self.config = config or load_config()
+        llm_cfg = self.config.get("quillforge", {}).get("llm", {})
+        # timeout：配置值 ≥1000 视为毫秒，否则视为秒（兼容历史配置）
+        try:
+            _t = float(llm_cfg.get("timeout", 90000))
+        except (TypeError, ValueError):
+            _t = 90.0
+        timeout_s = _t / 1000.0 if _t >= 1000 else _t
+        # 使用统一 LLM 客户端，从配置文件读取参数
+        self.llm = LLMClient(
+            model=llm_cfg.get("model", "deepseek-chat"),
+            temperature=llm_cfg.get("temperature", 0.8),
+            max_tokens=llm_cfg.get("maxTokens", 3000),
+            timeout=timeout_s,
+            connect_timeout=10.0,
+            api_key=llm_cfg.get("apiKey") or None,
+            api_base=llm_cfg.get("apiBase") or None,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        # 加载所有 Prompt 模板
+        self.prompts = {
+            "system": load_prompt("system_prompt_v2.md"),
+            "system_dynamic": load_prompt("system_prompt_v2.md"),
+            "narration": load_prompt("narration_v2.md"),
+            "dialogue": load_prompt("dialogue_v2.md"),
+            "choices": load_prompt("choices_v2.md"),
+            "personality_judge": load_prompt("personality_judge.md"),
+        }
+        gate_cfg = (self.config.get("quillforge", {})
+                    .get("stages", {})
+                    .get("validationGate", {}))
+        self.judge_max_tokens = int(gate_cfg.get("judgeMaxTokens", 300))
+
+    def render_template(self, template: str, variables: dict) -> str:
+        """渲染 Prompt 模板"""
+        return render_template(template, variables)
+
+    def render_system_prompt(self, extra, harness_input) -> str:
+        """构建系统提示词（融合世界书约束和叙事风格）
+        
+        extra 支持 dict（向后兼容）和 ExtraContext（类型安全）两种输入。
+        """
+        # 兼容 ExtraContext 对象
+        if hasattr(extra, "to_prompt_variables"):
+            sys_prompt_vars = {
+                "narrativeStyle": extra.narrative_style or "第三人称叙事",
+                "worldbookRules": extra.worldbook,
+                "plotSummary": extra.plot_summary,
+                "coreConflict": extra.core_conflict,
+                "themes": extra.themes,
+                "relationshipNetwork": extra.relationship_network,
+                "sceneAtmosphere": extra.scene_details[:200] if extra.scene_details else "",
+                "narrativeNotes": "",
+                "emotionalArc": "",
+                "minDialogues": harness_input.options.dialogue_count_min,
+                "maxDialogues": harness_input.options.dialogue_count_max,
+            }
+        else:
+            sys_prompt_vars = {
+                "narrativeStyle": extra.get("_narrativeStyle", "第三人称叙事"),
+                "worldbookRules": extra.get("_worldbook", ""),
+                "plotSummary": extra.get("_plotSummary", ""),
+                "coreConflict": extra.get("_coreConflict", ""),
+                "themes": extra.get("_themes", ""),
+                "relationshipNetwork": extra.get("_relationshipNetwork", ""),
+                "sceneAtmosphere": (
+                    extra.get("_sceneAtmosphere", "")
+                    or extra.get("_sceneDetails", "")[:200]
+                ),
+                "narrativeNotes": extra.get("_narrativeNotes", ""),
+                "emotionalArc": extra.get("_emotionalArc", ""),
+                "minDialogues": harness_input.options.dialogue_count_min,
+                "maxDialogues": harness_input.options.dialogue_count_max,
+            }
+        return render_template(self.prompts["system_dynamic"], sys_prompt_vars)
+
+    # ── LLM 调用委托 ──
+
+    def call(self, system: str, user: str, model: str = "") -> str:
+        """调用 LLM 生成文本"""
+        return self.llm.generate(system, user, model)
+
+    def call_stream(self, system: str, user: str, model: str = "") -> Generator[str, None, None]:
+        """调用 LLM 流式生成"""
+        yield from self.llm.generate_stream(system, user, model)
+
+    def call_json(self, system: str, user: str, model: str = "", _retries: int = 2) -> dict | list:
+        """调用 LLM 并解析 JSON 输出"""
+        return self.llm.generate_json(system, user, model, retries=_retries)
+
+    def call_json_stream(self, system: str, user: str, model: str = ""):
+        """调用 LLM 流式生成并增量解析 JSON 数组"""
+        yield from self.llm.generate_json_stream(system, user, model)
+
+    # ── Stage 5 性格评审兜底 ──
+
+    def judge_personality(self, char, lines: list[str]) -> float | None:
+        """用 LLM 评审某角色的一批台词是否符合其性格/说话风格，返回 0-1 分。
+
+        仅在性格关键词词表零命中时被调用；任何异常或解析失败都返回 None，
+        由验证器退回「不阻塞」，绝不因为评审本身出错而拖垮生成。
+        """
+        template = self.prompts.get("personality_judge") or ""
+        if not template or not lines:
+            return None
+        user_prompt = render_template(template, {
+            "charName": getattr(char, "name", ""),
+            "personality": getattr(char, "personality", ""),
+            "voiceTone": getattr(char, "speaking_style", ""),
+            "background": getattr(char, "background", ""),
+            "lines": [str(t)[:120] for t in lines[:12]],
+        })
+        try:
+            raw = self.llm.generate(
+                "你是严格的剧本角色一致性评审，只输出 JSON，不要任何额外说明。",
+                user_prompt, max_tokens=self.judge_max_tokens, temperature=0.0,
+            )
+        except Exception as e:
+            logger.warning("[sut] 性格评审调用失败 (%s): %s", getattr(char, "name", "?"), e)
+            return None
+        match = re.search(r'"score"\s*:\s*([0-9]*\.?[0-9]+)', raw or "")
+        if not match:
+            logger.warning("[sut] 性格评审输出无法解析: %s", (raw or "")[:120])
+            return None
+        return max(0.0, min(1.0, float(match.group(1))))
