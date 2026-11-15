@@ -28,9 +28,9 @@ test('rejects private config, forbidden trees, local paths and oversized files',
 test('accepts the public root contract and ignores runtime-only trees', async () => {
   const root = await mkdtemp(join(tmpdir(), 'gewuzaojing-repo-'));
   try {
-    await mkdir(join(root, 'apps', 'quillforge', 'var'), { recursive: true });
+    await mkdir(join(root, '.run'), { recursive: true });
     await writeFile(join(root, '.env.example'), 'API_KEY=replace\n');
-    await writeFile(join(root, 'apps', 'quillforge', 'var', 'runtime.bin'), Buffer.alloc(64));
+    await writeFile(join(root, '.run', 'runtime.bin'), Buffer.alloc(64));
     assert.deepEqual(await collectRepositoryViolations(root, { maxBytes: 32 }), []);
   } finally {
     await rm(root, { recursive: true, force: true });

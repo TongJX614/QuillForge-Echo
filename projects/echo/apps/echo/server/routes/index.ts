@@ -185,6 +185,8 @@ router.post('/api/data', (req, res) => {
 router.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
+    app: 'echo',
+    engineUrl: (process.env.NARRATIVE_ENGINE_URL || 'http://127.0.0.1:8050').replace(/\/+$/, ''),
     env: process.env.COZE_PROJECT_ENV,
     timestamp: new Date().toISOString(),
   });

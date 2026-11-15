@@ -9,8 +9,8 @@ const source = readFileSync(
 for (const required of [
   'export interface WebExperienceDefinition',
   'openWebExperience(',
-  'isQuillForgeMessage(e.data)',
-  'e.data.type === EMBED_MESSAGE.quillforgeReady',
+  'isEngineMessage(e.data)',
+  'e.data.type === EMBED_MESSAGE.narrativeEngineReady',
   'e.data.type === EMBED_MESSAGE.pauseRequest',
   'createEchoMessage(paused ? EMBED_MESSAGE.pause : EMBED_MESSAGE.resume)',
   'e.source !== frame.contentWindow',

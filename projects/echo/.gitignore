@@ -19,6 +19,8 @@ node_modules/
 .coze/
 *.log
 *.pid
-apps/quillforge/var/
 Thumbs.db
 .DS_Store
+
+# 上层编排启动本游戏时写入的运行日志
+.run/

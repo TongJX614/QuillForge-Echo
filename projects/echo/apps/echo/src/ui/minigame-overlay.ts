@@ -1,4 +1,4 @@
-import { EMBED_MESSAGE, createEchoMessage, isQuillForgeMessage } from './embed-contract';
+import { EMBED_MESSAGE, createEchoMessage, isEngineMessage } from './embed-contract';
 
 const MINIGAMES: Record<string, { title: string; src: string }> = {
   'slit-rebuttal': {
@@ -14,7 +14,7 @@ const MINIGAMES: Record<string, { title: string; src: string }> = {
 const WEB_EXPERIENCE_STYLE_ID = 'echo-web-experience-style';
 
 export interface WebExperienceDefinition {
-  id: 'quillforge-webui';
+  id: 'narrative-engine-webui';
   title: string;
   src: string;
   readyTimeoutMs?: number;
@@ -68,7 +68,7 @@ export class MinigameOverlay {
       if (e.source !== frame.contentWindow) return;
       const data = e.data as { type?: string; id?: string } | null;
       if (!data) return;
-      if (isQuillForgeMessage(data) && data.type === EMBED_MESSAGE.pauseRequest) {
+      if (isEngineMessage(data) && data.type === EMBED_MESSAGE.pauseRequest) {
         this.onPauseRequest?.();
         return;
       }
@@ -106,7 +106,7 @@ export class MinigameOverlay {
         <button type="button" data-action="exit">退出体验</button>
       </header>
       <section data-role="viewport">
-        <div data-role="loading">正在连接 QuillForge…</div>
+        <div data-role="loading">正在连接 叙事引擎…</div>
       </section>`;
 
     const viewport =
@@ -138,12 +138,12 @@ export class MinigameOverlay {
   private installWebMessageHandler(frame: HTMLIFrameElement): void {
     this.handler = (e: MessageEvent) => {
       if (e.source !== frame.contentWindow) return;
-      if (!isQuillForgeMessage(e.data)) return;
+      if (!isEngineMessage(e.data)) return;
       if (e.data.type === EMBED_MESSAGE.pauseRequest) {
         this.onPauseRequest?.();
         return;
       }
-      if (e.data.type === EMBED_MESSAGE.quillforgeReady) {
+      if (e.data.type === EMBED_MESSAGE.narrativeEngineReady) {
         this.markWebReady();
       }
     };
@@ -174,8 +174,8 @@ export class MinigameOverlay {
     viewport.insertAdjacentHTML(
       'beforeend',
       `<div data-role="failure">
-        <strong>QuillForge 未响应</strong>
-        <span>确认本地 8050 服务已经启动后重试。</span>
+        <strong>叙事引擎 未响应</strong>
+        <span>确认本地 叙事引擎 引擎已经启动后重试。</span>
         <button type="button" data-action="retry">重试连接</button>
         <button type="button" data-action="exit">返回实验室</button>
       </div>`,
@@ -193,7 +193,7 @@ export class MinigameOverlay {
         ?.querySelector('[data-role="viewport"]')
         ?.insertAdjacentHTML(
           'beforeend',
-          '<div data-role="loading">正在重新连接 QuillForge…</div>',
+          '<div data-role="loading">正在重新连接 叙事引擎…</div>',
         );
       if (this.statusEl) this.statusEl.textContent = '正在重新接入项目二…';
       this.frame.src = this.webDefinition.src;

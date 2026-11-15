@@ -2,7 +2,7 @@
   "name": "gewuzaojing-echo",
   "version": "1.0.0",
   "private": true,
-  "description": "Echo pixel RPG and QuillForge generative narrative workspace",
+  "description": "Echo pixel RPG workspace; generative narrative is provided by an external engine",
   "type": "module",
   "scripts": {
     "setup": "node scripts/setup.mjs",

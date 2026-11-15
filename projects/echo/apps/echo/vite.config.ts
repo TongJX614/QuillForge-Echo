@@ -5,13 +5,8 @@ export default defineConfig({
     port: 5000,
     host: '0.0.0.0',
     allowedHosts: true,
-    hmr: {
-      overlay: true,
-      path: '/hot/vite-hmr',
-      port: 6000,
-      clientPort: 443,
-      timeout: 30000,
-    },
+    // 本地由 Express 托管，固定 HMR 端口会和同机其他 ECHO 实例冲突
+    hmr: false,
     watch: {
       usePolling: true,
       interval: 100,

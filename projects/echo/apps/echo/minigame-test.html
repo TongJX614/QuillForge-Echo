@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小游戏测试平台 · ECHO</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; background: #05090e; color: #dff6ff; font-family: "Noto Sans SC", sans-serif; }
+      #app { max-width: 760px; margin: 0 auto; padding: 40px 20px; }
+      h1 { font-size: 26px; letter-spacing: 2px; color: #7ef0ff; margin: 0 0 8px; }
+      .sub { color: #8fb0c8; font-size: 14px; margin-bottom: 24px; }
+      #buttons { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+      #buttons button {
+        padding: 12px 18px; background: rgba(2, 20, 30, 0.9); color: #dff6ff; cursor: pointer;
+        border: 1px solid rgba(0, 243, 255, 0.35); font-size: 14px; border-radius: 4px;
+        transition: all 0.15s;
+      }
+      #buttons button:hover { background: rgba(0, 243, 255, 0.15); border-color: #00f3ff; }
+      #log { font-size: 13px; color: #8fb0c8; min-height: 20px; padding: 10px; border-left: 3px solid rgba(0,243,255,0.4); background: rgba(2,12,18,0.6); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>小游戏测试平台</h1>
+      <p class="sub">点选下方按钮预览各小游戏（示例参数贴合洛伦兹·索尔维会议场景）。</p>
+      <div id="buttons"></div>
+      <div id="log">等待选择…</div>
+    </div>
+    <script type="module" src="/src/minigame-test.ts"></script>
+  </body>
+</html>

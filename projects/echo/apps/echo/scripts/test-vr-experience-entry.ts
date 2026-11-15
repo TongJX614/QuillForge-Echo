@@ -4,24 +4,16 @@ import { prepareVrExperience } from '../src/systems/vr-experience';
 import type { LaunchVrExperienceRequest } from '../src/types/vr-experience';
 
 const request: LaunchVrExperienceRequest = {
-  experienceId: 'quillforge-webui',
-  projectTwo: {
-    schemaVersion: 1,
-    themeId: 'observation-reality',
-    roleId: 'witness',
-  },
+  experienceId: 'narrative-engine-webui',
 };
-const expectedUrl =
-  'http://127.0.0.1:8050/?entry=echo-project-2&v=1&theme=observation-reality&role=witness';
 
 assert.deepEqual(prepareVrExperience(request), {
   status: 'ready',
-  url: expectedUrl,
+  url: 'http://127.0.0.1:8050/weave/',
 });
 assert.deepEqual(
   prepareVrExperience({
-    ...request,
-    projectTwo: { ...request.projectTwo, roleId: 'intruder' },
+    experienceId: 'solvay-dlc',
   } as unknown as LaunchVrExperienceRequest),
   { status: 'invalid' },
 );

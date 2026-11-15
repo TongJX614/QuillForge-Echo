@@ -5,12 +5,6 @@
 
 import type { StartConditionEntry } from './quests/types';
 import type { NarrativeAction } from '../systems/condition-action';
-import { getProjectTwoCanonicalBrief } from './vr-experiences';
-import type {
-  ProjectTwoRoleId,
-  ProjectTwoSelection,
-  ProjectTwoThemeId,
-} from '../types/vr-experience';
 
 export type Emotion = 'idle' | 'happy' | 'angry' | 'sad' | 'surprise';
 
@@ -37,6 +31,34 @@ export interface DialogueNode {
 
 export type EventType = 'event_type1' | 'event_type2';
 
+/** 小游戏触发条件：全部满足才触发（否则该段对话正常进行、不插入小游戏） */
+export interface MinigameCondition {
+  /** 指定委托已完成 */
+  questCompleted?: string;
+  /** 指定委托当前步骤 ≥ step（或已完成） */
+  questStepAtLeast?: { questId: string; step: number };
+  /** 需要已设置的旗标 */
+  requireFlags?: string[];
+  /** 需要持有的物品 */
+  requireItems?: { itemId: string; count?: number }[];
+}
+
+/** 插入式小游戏：在对话说完、进入选项之前自动进入，通关后继续对话 */
+export interface DialogueMinigame {
+  type: string;
+  title?: string;
+  instructions?: string;
+  items?: (string | { title: string; snippet?: string })[];
+  clues?: string[];
+  distractors?: (string | { title: string; snippet?: string })[];
+  flag?: string;
+  questId?: string;
+  /** 插入时机：在本段对白的第 afterLine 句之后插入（引擎根据剧情判断）；不填=对白说完时 */
+  afterLine?: number;
+  /** 触发条件（如"拿回资料后才整理"）；不满足则不触发 */
+  condition?: MinigameCondition;
+}
+
 export interface DialogueTree {
   id: string;
   scene: string;          // 关联场景
@@ -46,6 +68,8 @@ export interface DialogueTree {
   stage?: string;         // 只在该阶段显示此对话；不填 = 任意阶段
   condition?: StartConditionEntry[];  // 满足全部条件时才显示；不填 = 无条件
   priority?: number;      // 解析优先级（数值越大越优先），默认 0
+  /** 插入式小游戏（对话过程中触发，通关后继续对话） */
+  minigame?: DialogueMinigame;
   nodes: Record<string, DialogueNode>;
   startNode: string;      // 起始节点 ID
 }
@@ -88,6 +112,269 @@ export const DIALOGUE_OFFICE_XIAO: DialogueTree = {
         { speaker: 'lin_xiao', text: '正在追踪……加密层太深了，但IP路由指向新深圳织星塔附近。', emotion: 'idle' },
         { speaker: 'su_ran', text: '织星科技？……有意思。好吧，修，但我会留自己的备份。', emotion: 'happy' },
         { speaker: 'lin_xiao', text: '偷偷留备份……这违反了委托条件。但我会帮你遮掩的。', emotion: 'happy' },
+      ],
+    },
+  },
+};
+
+// ============================================================
+// 办公室 — 记忆修复线：林晓简报 + 工作台修复 + 天文校准 + VR 重建
+// ============================================================
+const MEMORY_REPAIR_MINIGAME: DialogueMinigame = {
+  type: 'connect',
+  title: '神经接口对接',
+  instructions: '把工作台各端口与神经接口的触点一一对应。',
+  items: ['记忆碎片', '神经接口', '工作台', '便携终端'],
+  clues: ['读取层', '同步协议', '供电', '数据落盘'],
+  flag: 'minigame_memory_repair_done',
+  afterLine: 2,
+};
+
+const ASTRO_MEMORY_MINIGAME: DialogueMinigame = {
+  type: 'signal',
+  title: '干涉信号对照',
+  instructions: '把修复后的记忆载波与 LISA 干涉记录对齐。',
+  flag: 'minigame_memory_check_done',
+  afterLine: 2,
+};
+
+const VR_MEMORY_MINIGAME: DialogueMinigame = {
+  type: 'find-clue',
+  title: '记忆现场勘察',
+  instructions: '在记忆空间里找出被抹掉的细节。',
+  clues: ['走廊尽头的门', '胸牌上的名字', '被剪断的监控时间', '地上的实验记录', '玻璃上的倒影', '编号末尾的 12'],
+  flag: 'minigame_memory_vr_done',
+  afterLine: 2,
+};
+
+export const DIALOGUE_OFFICE_REPAIR_BRIEF: DialogueTree = {
+  id: 'dlg_office_repair_brief',
+  scene: 'office',
+  trigger: 'lin_xiao',
+  startNode: 'start',
+  priority: 60,
+  condition: [
+    { type: 'has_item', target: 'memory_data' },
+    { type: 'has_item', target: 'neural_interface' },
+    { type: 'has_flag', target: 'talked:lin_xiao' },
+    { type: 'has_flag', target: 'mr_brief_done', value: false },
+  ],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'lin_xiao', text: '两样都齐了。记忆碎片的结构很奇怪——不是自然损坏，缺失段被切得很整齐。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '像是有人不想让我读到那一段。', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '神经接口可以补上读取层，但必须接在工作台上。碎片和接口一起接入，我盯底层协议。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '修复之后会看到什么？', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '可能是织女号事故的现场……也可能，是你自己的记忆。', emotion: 'sad' },
+      ],
+      choices: [
+        { text: '现在开始修复', next: 'go', actions: [{ type: 'flag.set', flag: 'mr_brief_done' }] },
+        { text: '先检查一遍工作台', next: 'go', actions: [{ type: 'flag.set', flag: 'mr_brief_done' }] },
+      ],
+    },
+    go: {
+      id: 'go',
+      lines: [
+        { speaker: 'lin_xiao', text: '工作台已经预热。把两样东西都接上，剩下的交给我。', emotion: 'happy' },
+        { speaker: 'narrator', text: '你把记忆碎片和神经接口带到工作台前。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_OFFICE_REPAIR: DialogueTree = {
+  id: 'dlg_office_repair',
+  scene: 'office',
+  trigger: 'memory_repair_console',
+  startNode: 'start',
+  priority: 50,
+  condition: [
+    { type: 'has_flag', target: 'mr_brief_done' },
+    { type: 'has_item', target: 'memory_data' },
+    { type: 'has_item', target: 'neural_interface' },
+    { type: 'has_flag', target: 'memory_repair_done', value: false },
+  ],
+  minigame: MEMORY_REPAIR_MINIGAME,
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '工作台的低鸣逐渐稳定，神经接口的触点亮起一圈冷光。', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '先把碎片按时间顺序拼回去。别急着看内容，先让结构闭合。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '……拼接完成。缺失的读取层正在回填。', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '接下来是接口同步。会有一点刺痛，忍一下。', emotion: 'sad' },
+        { speaker: 'narrator', text: '意识边缘闪过一段不属于此刻的画面：白色走廊，和一枚被剪断的编号。', emotion: 'surprise' },
+      ],
+      choices: [
+        {
+          text: '接入神经接口，继续修复',
+          next: 'repaired',
+          actions: [
+            { type: 'inventory.remove', itemId: 'memory_data', count: 1 },
+            { type: 'inventory.remove', itemId: 'neural_interface', count: 1 },
+            { type: 'flag.set', flag: 'memory_repair_done' },
+          ],
+        },
+      ],
+    },
+    repaired: {
+      id: 'repaired',
+      lines: [
+        { speaker: 'su_ran', text: '……我看见了。但数据还缺最后一层校验。', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '把修复后的载波带去天文实验室，和 LISA 的干涉记录对一遍。只有对上时间戳，才能确定这段记忆没有被篡改。', emotion: 'sad' },
+        { speaker: 'narrator', text: '记忆碎片与神经接口在工作台上熄灭了微光。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_OFFICE_REPAIR_LOCKED: DialogueTree = {
+  id: 'dlg_office_repair_locked',
+  scene: 'office',
+  trigger: 'memory_repair_console',
+  startNode: 'start',
+  priority: 20,
+  condition: [{ type: 'has_flag', target: 'mr_brief_done', value: false }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '工作台的接口还没有解锁。先和林晓确认修复方案。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_OFFICE_REPAIR_DONE: DialogueTree = {
+  id: 'dlg_office_repair_done',
+  scene: 'office',
+  trigger: 'memory_repair_console',
+  startNode: 'start',
+  priority: 10,
+  condition: [{ type: 'has_flag', target: 'memory_repair_done' }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '工作台已经冷却。修复后的记忆载波已写入便携终端。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_ASTRO_MEMORY_CHECK: DialogueTree = {
+  id: 'dlg_astro_memory_check',
+  scene: 'astro',
+  trigger: 'astro_scientist',
+  startNode: 'start',
+  priority: 80,
+  condition: [
+    { type: 'has_flag', target: 'memory_repair_done' },
+    { type: 'has_flag', target: 'memory_check_done', value: false },
+  ],
+  minigame: ASTRO_MEMORY_MINIGAME,
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'su_ran', text: '研究员，能借一下 LISA 的干涉记录吗？我在修复一段记忆载波，需要一个时间基准。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '干涉记录可以给你，但先做一次信号对照——把载波投影到同一频率上。', emotion: 'happy' },
+        { speaker: 'su_ran', text: '……载波和干涉条纹对上了。时间戳正在收敛。', emotion: 'surprise' },
+        { speaker: 'astro_scientist', text: '这个时间戳……不是普通委托数据，它和织女号退役那天完全重合。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '果然。那这段记忆不是别人寄来的，是从我自己脑子里被剪走的。', emotion: 'angry' },
+        { speaker: 'astro_scientist', text: '如果还有残余数据，去 VR 回溯实验室做完整重建。只有在那里，你才能看到被剪掉的现场。', emotion: 'idle' },
+      ],
+      choices: [
+        {
+          text: '去 VR 实验室，把剩下的记忆拼完',
+          next: 'exit',
+          actions: [{ type: 'flag.set', flag: 'memory_check_done' }],
+        },
+      ],
+    },
+    exit: {
+      id: 'exit',
+      lines: [
+        { speaker: 'narrator', text: '你把对齐后的载波写进便携终端。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '谢谢。剩下的，我自己来。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_VR_MEMORY_REPAIR: DialogueTree = {
+  id: 'dlg_vr_memory_repair',
+  scene: 'vr',
+  trigger: 'memory_repair_vr',
+  startNode: 'start',
+  priority: 80,
+  condition: [
+    { type: 'has_flag', target: 'memory_check_done' },
+    { type: 'has_flag', target: 'memory_fully_repaired', value: false },
+  ],
+  minigame: VR_MEMORY_MINIGAME,
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '记忆重建终端接入 VR 回溯装置，白色的记忆空间在眼前展开。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '这是……织女号的走廊。', emotion: 'surprise' },
+        { speaker: 'narrator', text: '你在走廊尽头看见一个熟悉的身影——那是几年前的她，正把一枚存储芯片藏进实验服内侧。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '那是我。被删除之前的我。', emotion: 'surprise' },
+        { speaker: 'lin_xiao', text: '苏然，时间戳开始漂移，必须马上退出。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '等等——芯片编号是……12。织女号上死了十二个人。', emotion: 'angry' },
+        { speaker: 'su_ran', text: '记忆的最后一层校验指向 1927 年的索尔维会议。匿名委托真正想让我看的，是那里。', emotion: 'idle' },
+      ],
+      choices: [
+        {
+          text: '记住这一切，退出记忆空间',
+          next: 'exit',
+          actions: [{ type: 'flag.set', flag: 'memory_fully_repaired' }],
+        },
+      ],
+    },
+    exit: {
+      id: 'exit',
+      lines: [
+        { speaker: 'narrator', text: '记忆空间碎裂成光点。你回到 VR 实验室，掌心里全是冷汗。', emotion: 'idle' },
+        { speaker: 'lin_xiao', text: '你看到了什么？', emotion: 'sad' },
+        { speaker: 'su_ran', text: '有人删掉了我的记忆，而那个人现在还在等我修好它。', emotion: 'angry' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_VR_MEMORY_LOCKED: DialogueTree = {
+  id: 'dlg_vr_memory_locked',
+  scene: 'vr',
+  trigger: 'memory_repair_vr',
+  startNode: 'start',
+  priority: 20,
+  condition: [{ type: 'has_flag', target: 'memory_check_done', value: false }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '记忆重建终端缺少时间基准。先去天文实验室完成校准。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_VR_MEMORY_DONE: DialogueTree = {
+  id: 'dlg_vr_memory_done',
+  scene: 'vr',
+  trigger: 'memory_repair_vr',
+  startNode: 'start',
+  priority: 10,
+  condition: [{ type: 'has_flag', target: 'memory_fully_repaired' }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'narrator', text: '记忆重建终端已归档。完整的记忆留在你的意识里，无法再被删除。', emotion: 'idle' },
       ],
     },
   },
@@ -302,6 +589,146 @@ export const DIALOGUE_ASTRO_LISA: DialogueTree = {
 };
 
 // ============================================================
+// Astro 实验室 — 主研究员：引力波探测器导览
+// 对应 NPC_Astro_lab_1.png（astro_scientist）
+// ============================================================
+export const DIALOGUE_ASTRO_DETECTOR: DialogueTree = {
+  id: 'dlg_astro_detector',
+  scene: 'astro',
+  trigger: 'astro_scientist',
+  startNode: 'start',
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'astro_scientist', text: '你也是来看引力波探测器的？请随意参观。', emotion: 'happy' },
+        { speaker: 'su_ran', text: '这就是探测器的主体？比我想象的安静。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '真正的引力波不会发出声音。它穿过这里时，只会让空间本身极其微小地伸缩。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '这台干涉仪要做的，就是把那种比原子还小的变化，一点点量出来。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '听起来像是在测量虚无。', emotion: 'surprise' },
+        { speaker: 'astro_scientist', text: '可以这么说。你想先听哪一部分？', emotion: 'happy' },
+      ],
+      choices: [
+        { text: '引力波到底是什么？', next: 'topic_wave' },
+        { text: '这台探测器怎么工作？', next: 'topic_detector' },
+        { text: '我先四处看看', next: 'exit' },
+      ],
+    },
+
+    // --- 引力波是什么 ---
+    topic_wave: {
+      id: 'topic_wave',
+      lines: [
+        { speaker: 'su_ran', text: '爱因斯坦预言的引力波……我总觉得离现实很远。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '一百年前它还是纯理论。2015 年 LIGO 第一次直接听到两个黑洞合并的信号，天文学从此多了一种感官。', emotion: 'happy' },
+        { speaker: 'su_ran', text: '那次发现之后，引力波天文学才算真正开始？', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '对。但目前听到的还只是高频段。超大质量黑洞合并的低频嗡鸣，会被地球自身的震动淹没。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '所以要上太空。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: 'LISA。三颗卫星拉开二百五十万公里的臂长，去听宇宙最深处、最古老的回响。', emotion: 'happy' },
+      ],
+      choices: [
+        { text: '引力波到底是什么？', next: 'topic_wave' },
+        { text: '这台探测器怎么工作？', next: 'topic_detector' },
+        { text: '我先四处看看', next: 'exit' },
+      ],
+    },
+
+    // --- 探测器原理 ---
+    topic_detector: {
+      id: 'topic_detector',
+      lines: [
+        { speaker: 'astro_scientist', text: '核心是激光干涉。一束激光被分成两路，沿两条互相垂直的长臂往返，再重新汇合。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '引力波经过时，一条臂会被拉长，另一条被压缩——幅度可能只有质子直径的几千分之一。', emotion: 'idle' },
+        { speaker: 'su_ran', text: '这么小的变化，怎么从噪声里分离出来？', emotion: 'surprise' },
+        { speaker: 'astro_scientist', text: '靠超高真空、隔震悬挂、超稳激光和长时间平均。整条光路都隔绝在地球震动之外。', emotion: 'happy' },
+        { speaker: 'su_ran', text: '环环相扣，任何一环出问题都前功尽弃。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '所以每次升级，都要把工程推到极限。可一旦"听到"，一切都值得。', emotion: 'happy' },
+      ],
+      choices: [
+        { text: '引力波到底是什么？', next: 'topic_wave' },
+        { text: '这台探测器怎么工作？', next: 'topic_detector' },
+        { text: '我先四处看看', next: 'exit' },
+      ],
+    },
+
+    // --- 退出 ---
+    exit: {
+      id: 'exit',
+      lines: [
+        { speaker: 'su_ran', text: '谢谢，我大致明白了。', emotion: 'idle' },
+        { speaker: 'astro_scientist', text: '不客气。想再深入了解，随时回来——宇宙的涟漪一直都在。', emotion: 'happy' },
+      ],
+    },
+  },
+};
+
+// ============================================================
+// Astro 实验室 — 隔离区人员：密封生物样本支线
+// ============================================================
+export const DIALOGUE_ASTRO_HAZMAT_QUEST: DialogueTree = {
+  id: 'dlg_astro_hazmat_quest',
+  scene: 'astro',
+  trigger: 'astro_hazmat',
+  startNode: 'start',
+  priority: 50,
+  condition: [{ type: 'talked_to_npc', target: 'astro_hazmat', value: false }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'astro_hazmat', text: '隔离区那边又出状况了……有个样本在容器里自己发光。', emotion: 'sad' },
+        { speaker: 'su_ran', text: '需要我做什么？', emotion: 'idle' },
+        { speaker: 'astro_hazmat', text: 'ARPES 实验室里还有一份密封生物样本。帮我取回来，千万别打开它。', emotion: 'sad' },
+      ],
+      choices: [
+        { text: '我去把样本取回来', next: 'exit' },
+        { text: '先记下了', next: 'exit' },
+      ],
+    },
+    exit: {
+      id: 'exit',
+      lines: [
+        { speaker: 'astro_hazmat', text: '小心点，别让样本碰到皮肤。取回来直接交给我。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_ASTRO_HAZMAT_URGE: DialogueTree = {
+  id: 'dlg_astro_hazmat_urge',
+  scene: 'astro',
+  trigger: 'astro_hazmat',
+  startNode: 'start',
+  priority: 10,
+  condition: [{ type: 'has_flag', target: 'isolation_sample_done', value: false }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'astro_hazmat', text: '样本取回来了吗？记住，别打开它。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+export const DIALOGUE_ASTRO_HAZMAT_THANKS: DialogueTree = {
+  id: 'dlg_astro_hazmat_thanks',
+  scene: 'astro',
+  trigger: 'astro_hazmat',
+  startNode: 'start',
+  priority: 5,
+  condition: [{ type: 'has_flag', target: 'isolation_sample_done' }],
+  nodes: {
+    start: {
+      id: 'start',
+      lines: [
+        { speaker: 'astro_hazmat', text: '样本已经锁进隔离柜了，多谢。隔离区暂时安稳。', emotion: 'idle' },
+      ],
+    },
+  },
+};
+
+// ============================================================
 // 场景 astro：研究员 — 门禁卡与《天体运行论》
 // 对应 NPC_Astro_lab_2.png（astro_scientist_back）
 // ============================================================
@@ -472,119 +899,8 @@ const DIALOGUE_VR_DEVICE_BASE: DialogueTree = {
 
 // ============================================================
 // VR 实验室 — VR 设备中的项目二“世界编织”分支
-// 只负责确定性选择与显式启动；最终与设备基础节点合并为唯一入口。
+// 无主题/身份预选：确认后整页切回 叙事引擎 编织台。
 // ============================================================
-const PROJECT_TWO_THEME_IDS: readonly ProjectTwoThemeId[] = [
-  'observation-reality',
-  'memory-identity',
-  'energy-civilization',
-];
-const PROJECT_TWO_ROLE_IDS: readonly ProjectTwoRoleId[] = [
-  'witness',
-  'calibrator',
-  'participant',
-];
-const PROJECT_TWO_THEME_SLUGS: Record<ProjectTwoThemeId, string> = {
-  'observation-reality': 'observation',
-  'memory-identity': 'memory',
-  'energy-civilization': 'energy',
-};
-const PROJECT_TWO_ROLE_NODE_IDS: Record<ProjectTwoThemeId, string> = {
-  'observation-reality': 'p2_role_observation',
-  'memory-identity': 'p2_role_memory',
-  'energy-civilization': 'p2_role_energy',
-};
-const PROJECT_TWO_ROLE_CHOICE_TEXT: Record<ProjectTwoRoleId, string> = {
-  witness: '我以旁证者进入：记录证据，尽量不改变事件。',
-  calibrator: '我以校准员进入：修复异常，并承担干预的后果。',
-  participant: '我以当事人进入：卷入冲突，让自己也成为谜题。',
-};
-
-function projectTwoNodeId(
-  kind: 'confirm' | 'modify',
-  themeId: ProjectTwoThemeId,
-  roleId: ProjectTwoRoleId,
-): string {
-  return `p2_${kind}_${PROJECT_TWO_THEME_SLUGS[themeId]}_${roleId}`;
-}
-
-function projectTwoRoleChoices(
-  themeId: ProjectTwoThemeId,
-): DialogueChoice[] {
-  return PROJECT_TWO_ROLE_IDS.map(roleId => ({
-    text: PROJECT_TWO_ROLE_CHOICE_TEXT[roleId],
-    next: projectTwoNodeId('confirm', themeId, roleId),
-  }));
-}
-
-function buildProjectTwoCombinationNodes(): Record<string, DialogueNode> {
-  const nodes: Record<string, DialogueNode> = {};
-  for (const themeId of PROJECT_TWO_THEME_IDS) {
-    for (const roleId of PROJECT_TWO_ROLE_IDS) {
-      const selection: ProjectTwoSelection = {
-        schemaVersion: 1,
-        themeId,
-        roleId,
-      };
-      const brief = getProjectTwoCanonicalBrief(selection);
-      if (!brief) {
-        throw new Error(`PROJECT_TWO_BRIEF_MISSING:${themeId}:${roleId}`);
-      }
-      const confirmId = projectTwoNodeId('confirm', themeId, roleId);
-      const modifyId = projectTwoNodeId('modify', themeId, roleId);
-      nodes[confirmId] = {
-        id: confirmId,
-        lines: [
-          {
-            speaker: 'researcher',
-            text: '坐标已经成形。我把你的选择收束成了这份简报。',
-            emotion: 'happy',
-          },
-          { speaker: 'researcher', text: brief, emotion: 'idle' },
-          {
-            speaker: 'researcher',
-            text: '它不是既定剧情，只是生成时必须守住的起点。QuillForge 会据此扩展人物、地点与事件；沉浸舱会先呈现世界书摘要，等你审阅后再决定是否进入。',
-            emotion: 'idle',
-          },
-        ],
-        choices: [
-          {
-            text: '确认这份简报，接入项目二。',
-            next: 'p2_after_launch',
-            actions: [
-              {
-                type: 'launch_vr_experience',
-                experienceId: 'quillforge-webui',
-                projectTwo: selection,
-              },
-            ],
-          },
-          { text: '我想修改刚才的选择。', next: modifyId },
-          { text: '这次先不参加。', next: 'p2_decline' },
-        ],
-      };
-      nodes[modifyId] = {
-        id: modifyId,
-        lines: [
-          {
-            speaker: 'researcher',
-            text: '可以。世界还没有启动，现在改动坐标不会丢失任何东西。',
-            emotion: 'idle',
-          },
-        ],
-        choices: [
-          { text: '重新选择这个世界的问题。', next: 'p2_theme' },
-          {
-            text: '保留母题，只调整我的身份。',
-            next: PROJECT_TWO_ROLE_NODE_IDS[themeId],
-          },
-          { text: '不用修改，返回刚才的简报。', next: confirmId },
-        ],
-      };
-    }
-  }
-  return nodes;
-}
 
 const DIALOGUE_VR_PROJECT_TWO_BRANCH: DialogueTree = {
   id: 'dlg_vr_device_project_two_branch',
@@ -602,147 +918,32 @@ const DIALOGUE_VR_PROJECT_TWO_BRANCH: DialogueTree = {
         },
         {
           speaker: 'researcher',
-          text: '世界编织连接的是仍在成长的项目二。你给出一个科学问题和进入世界的身份，我把它们整理成简报，再交给 QuillForge 尝试生成世界书与互动故事。',
+          text: '世界编织直接连通 叙事引擎 编织台。没有预设的主题或身份——世界的起点由你亲自写下。',
           emotion: 'happy',
         },
         {
           speaker: 'researcher',
-          text: '生成结果可能存在差异。所以新世界不会直接把你卷进去：沉浸舱会先呈现世界书摘要，审阅之后，再由你决定是否开始游戏。',
+          text: '确认之后，画面会直接切回项目二的工作台。生成什么、怎么生成，都由你在那里决定。',
           emotion: 'idle',
         },
       ],
       choices: [
-        { text: '好，先从这个世界的问题开始。', next: 'p2_theme' },
         {
-          text: '再说明一下两种体验的区别。',
-          next: 'p2_difference',
+          text: '确认，进入编织世界。',
+          next: 'p2_after_launch',
+          actions: [
+            { type: 'launch_vr_experience', experienceId: 'narrative-engine-webui' },
+          ],
         },
         { text: '返回装置选择。', next: 'node_vr_choose_experience' },
       ],
     },
-    p2_difference: {
-      id: 'p2_difference',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '项目一回答的是：怎样更接近一段真实历史。因此人物、事件和观点都必须服从史料边界。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '项目二追问的是：能不能从一个科学问题出发，生成一个规则自洽、可以亲身体验的世界。它允许想象，也必须承认生成中的不确定性。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '前者是我们精心完成的历史体验，后者是仍在成长的世界原型实验。它们彼此独立，也不互相替代。',
-          emotion: 'happy',
-        },
-      ],
-      choices: [
-        { text: '好，先从这个世界的问题开始。', next: 'p2_theme' },
-        { text: '返回装置选择。', next: 'node_vr_choose_experience' },
-      ],
-    },
-    p2_theme: {
-      id: 'p2_theme',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '那就先确定这个世界的张力源。不是景观或年代，而是所有人物最终都绕不开的问题。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '你希望它追问什么？',
-          emotion: 'happy',
-        },
-      ],
-      choices: [
-        {
-          text: '我想追问观测与真实：观察会不会改变真相？',
-          next: 'p2_role_observation',
-        },
-        {
-          text: '我想追问记忆与身份：改写记忆，还是原来的我吗？',
-          next: 'p2_role_memory',
-        },
-        {
-          text: '我想追问能量与文明：有限能源该换取谁的未来？',
-          next: 'p2_role_energy',
-        },
-      ],
-    },
-    p2_role_observation: {
-      id: 'p2_role_observation',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '在这个世界里，“看见”不再只是记录，它本身也可能成为事件的一部分。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '接下来决定你站在哪里。位置不同，世界向你开放的证据也会不同。',
-          emotion: 'happy',
-        },
-      ],
-      choices: projectTwoRoleChoices('observation-reality'),
-    },
-    p2_role_memory: {
-      id: 'p2_role_memory',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '当记忆可以复制、删改和重放，身份就不再是默认答案。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '接下来决定你站在哪里。位置不同，世界向你开放的证据也会不同。',
-          emotion: 'happy',
-        },
-      ],
-      choices: projectTwoRoleChoices('memory-identity'),
-    },
-    p2_role_energy: {
-      id: 'p2_role_energy',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '只要资源有限，每一种未来都会占用另一种未来的代价。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '接下来决定你站在哪里。位置不同，世界向你开放的证据也会不同。',
-          emotion: 'happy',
-        },
-      ],
-      choices: projectTwoRoleChoices('energy-civilization'),
-    },
-    ...buildProjectTwoCombinationNodes(),
     p2_after_launch: {
       id: 'p2_after_launch',
       lines: [
         {
           speaker: 'researcher',
-          text: '项目二已经接入沉浸舱。世界书是否生成完成、是否进入故事，都以舱内实际显示为准。',
-          emotion: 'idle',
-        },
-      ],
-    },
-    p2_decline: {
-      id: 'p2_decline',
-      lines: [
-        {
-          speaker: 'researcher',
-          text: '当然。装置不会替你作决定。等你有一个真正想追问的问题，再回来。',
-          emotion: 'idle',
-        },
-        {
-          speaker: 'researcher',
-          text: '索尔维会议体验仍按原来的方式开放。',
+          text: '正在切回 叙事引擎 编织台。世界的坐标，等你落笔。',
           emotion: 'happy',
         },
       ],
@@ -1630,6 +1831,28 @@ export const DIALOGUE_SOLVAY_DE_BROGLIE: DialogueTree = {
 // ============================================================
 // 1927 索尔维会议 — 洛伦兹：任务前置对话（洛伦兹的委托 · 未交谈时）
 // ============================================================
+// 洛伦兹委托的"插入式小游戏"（对话过程中自动触发，通关后继续对话）
+const LORENTZ_ARCHIVE_MINIGAME: DialogueMinigame = {
+  type: 'archive-sort',
+  title: '档案整理',
+  instructions: '把本次会议需要归档的资料放入归档框；与会议无关的不要放进去。',
+  items: [
+    { title: '座位安排表', snippet: '三十二位学者的席位次序，边角有洛伦兹的手写批注。' },
+    { title: '科学家桌牌', snippet: '铜版刻字，名字被茶渍晕开了一角。' },
+    { title: '会议议程', snippet: '上午联合报告，下午自由辩论，附休息时段。' },
+    { title: '签到名册', snippet: '签名与抵达时间；居里夫人一栏还空着。' },
+  ],
+  distractors: [
+    { title: '空白便笺', snippet: '没有字，纸角卷起，像是随手撕下的。' },
+    { title: '私人信件', snippet: '未署名的问候，与会议议程无关。' },
+    { title: '旧报纸剪报', snippet: '关于天气与赛马的旧闻。' },
+  ],
+  flag: 'minigame_solvay_archive_done',
+  questId: 'quest_lorentz_commission',
+  // 触发时机：至少收集完资料（进入提交步）或已完成委托，才让他整理
+  condition: { questStepAtLeast: { questId: 'quest_lorentz_commission', step: 2 } },
+};
+
 export const DIALOGUE_SOLVAY_LORENTZ_QUEST: DialogueTree = {
   id: 'dlg_solvay_lorentz_quest',
   scene: 'solvay',
@@ -1637,6 +1860,7 @@ export const DIALOGUE_SOLVAY_LORENTZ_QUEST: DialogueTree = {
   startNode: 'start',
   priority: 50,
   condition: [{ type: 'has_flag', target: 'talked:solvay_lorentz', value: false }],
+  minigame: LORENTZ_ARCHIVE_MINIGAME,
   nodes: {
     start: {
       id: 'start',
@@ -1649,7 +1873,7 @@ export const DIALOGUE_SOLVAY_LORENTZ_QUEST: DialogueTree = {
         { speaker: 'solvay_lorentz', text: '（恳切地）能帮我找回来吗？它们应该还在会场附近。拜托了。', emotion: 'idle' },
       ],
       choices: [
-        { text: '交给我吧', next: 'accept' },
+                { text: '交给我吧', next: 'accept' },
         { text: '（与他们再聊聊）', next: 'accept' },
       ],
     },
@@ -1676,6 +1900,7 @@ export const DIALOGUE_SOLVAY_LORENTZ_URGE: DialogueTree = {
     { type: 'talked_to_npc', target: 'solvay_lorentz' },
     { type: 'quest_completed', target: 'quest_lorentz_commission', value: false },
   ],
+  minigame: LORENTZ_ARCHIVE_MINIGAME,
   nodes: {
     start: {
       id: 'start',
@@ -1700,6 +1925,7 @@ export const DIALOGUE_SOLVAY_LORENTZ_THANKS: DialogueTree = {
     { type: 'quest_completed', target: 'quest_lorentz_commission' },
     { type: 'has_flag', target: 'lorentz_thanked', value: false },
   ],
+  minigame: LORENTZ_ARCHIVE_MINIGAME,
   nodes: {
     start: {
       id: 'start',
@@ -1711,7 +1937,7 @@ export const DIALOGUE_SOLVAY_LORENTZ_THANKS: DialogueTree = {
         { speaker: 'solvay_lorentz', text: '但只要他们还愿意坐在同一张桌子旁，愿意看着对方的眼睛说话——物理学就还有希望。这就是桌牌和座位表真正的意义。', emotion: 'idle' },
       ],
       choices: [
-        { text: '我明白了。（告辞）', next: 'exit_thanks', actions: [{ type: 'flag.set', flag: 'lorentz_thanked' }] },
+                { text: '我明白了。（告辞）', next: 'exit_thanks', actions: [{ type: 'flag.set', flag: 'lorentz_thanked' }] },
         { text: '（不必多言，转身离开）', next: 'exit_thanks', actions: [{ type: 'flag.set', flag: 'lorentz_thanked' }] },
       ],
     },
@@ -1831,6 +2057,14 @@ export const DIALOGUE_SOLVAY_DE_BROGLIE_THANKS: DialogueTree = {
 // ============================================================
 export const DIALOGUE_CG_SOLVAY_REPORT: DialogueTree = {
   id: 'dlg_cg_solvay_report',
+  minigame: {
+    type: 'formula-fill',
+    title: '推导补全',
+    instructions: '补全报告里推导空缺的一项。',
+    clues: ['玻恩与海森堡的联合报告中，|ψ|² 代表——'],
+    items: ['概率密度（概率幅的平方）', '能量 E = hν', '动量 p = mv'],
+    flag: 'minigame_solvay_report_formula',
+  },
   scene: 'solvay',
   trigger: 'solvay_lorentz',
   eventType: 'event_type2',
@@ -2023,6 +2257,14 @@ export const DIALOGUE_CG_SOLVAY_BOHR_REPORT: DialogueTree = {
 // ============================================================
 export const DIALOGUE_CG_SOLVAY_DEBATE: DialogueTree = {
   id: 'dlg_cg_solvay_debate',
+  minigame: {
+    type: 'quote-match',
+    title: '名言归位',
+    instructions: '这句名言出自哪位科学家？',
+    clues: ['“上帝不掷骰子。”'],
+    items: ['爱因斯坦', '玻尔', '海森堡'],
+    flag: 'minigame_solvay_debate_quote',
+  },
   scene: 'solvay',
   trigger: 'solvay_bohr',
   eventType: 'event_type2',
@@ -2178,6 +2420,14 @@ export const DIALOGUE_CG_SOLVAY_PHOTON_BOX: DialogueTree = {
 // ============================================================
 export const DIALOGUE_CG_SOLVAY_FINAL_DEBATE: DialogueTree = {
   id: 'dlg_cg_solvay_final_debate',
+  minigame: {
+    type: 'quote-match',
+    title: '名言归位',
+    instructions: '这句名言出自哪位科学家？',
+    clues: ['“不要告诉上帝该怎么做。”'],
+    items: ['玻尔', '爱因斯坦', '薛定谔'],
+    flag: 'minigame_solvay_final_quote',
+  },
   scene: 'solvay',
   trigger: 'solvay_einstein',
   eventType: 'event_type2',
@@ -2264,10 +2514,22 @@ export const DIALOGUE_CG_SOLVAY_FINAL_DEBATE: DialogueTree = {
 // ============================================================
 export const ALL_DIALOGUES: DialogueTree[] = [
   DIALOGUE_OFFICE_XIAO,
+  DIALOGUE_OFFICE_REPAIR_BRIEF,
+  DIALOGUE_OFFICE_REPAIR,
+  DIALOGUE_OFFICE_REPAIR_LOCKED,
+  DIALOGUE_OFFICE_REPAIR_DONE,
+  DIALOGUE_ASTRO_MEMORY_CHECK,
+  DIALOGUE_VR_MEMORY_REPAIR,
+  DIALOGUE_VR_MEMORY_LOCKED,
+  DIALOGUE_VR_MEMORY_DONE,
   DIALOGUE_ARPES_MONOLOGUE,
   DIALOGUE_ARPES_SAMPLE_ROD,
   DIALOGUE_ASTRO_LISA,
   DIALOGUE_ASTRO_LISA_CG,
+  DIALOGUE_ASTRO_DETECTOR,
+  DIALOGUE_ASTRO_HAZMAT_QUEST,
+  DIALOGUE_ASTRO_HAZMAT_URGE,
+  DIALOGUE_ASTRO_HAZMAT_THANKS,
   DIALOGUE_ASTRO_BOOK,
   DIALOGUE_ASTRO_BOOK_THANKS,
   DIALOGUE_VR_DEVICE_CG,

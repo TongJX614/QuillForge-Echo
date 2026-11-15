@@ -24,6 +24,8 @@ export async function createEchoApp(
 ): Promise<Express> {
   const app = express();
   const isDev = process.env.COZE_PROJECT_ENV !== 'PROD';
+  const engineBase = (process.env.NARRATIVE_ENGINE_URL || 'http://127.0.0.1:8050')
+    .replace(/\/+$/, '');
 
   if (isDev) {
     app.use((req, res, next) => {
@@ -38,6 +40,15 @@ export async function createEchoApp(
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // 前端运行时配置：引擎端口由 叙事引擎 启动时注入，换端口不需要重新构建
+  app.get('/echo-runtime-config.js', (_req, res) => {
+    res
+      .type('application/javascript')
+      .set('Cache-Control', 'no-store')
+      .send(`window.__ECHO_RUNTIME__=${JSON.stringify({ engineBase })};`);
+  });
+
   app.use(router);
 
   const providerDependencies = dependencies.fetch === undefined
@@ -46,7 +57,7 @@ export async function createEchoApp(
   registerChatRoutes(
     app,
     { connection: config.connection, model: config.chatModel },
-    providerDependencies,
+    { ...providerDependencies, engineBase },
   );
   registerQuestRoutes(
     app,

@@ -8,25 +8,15 @@ import {
 
 const approvedAction: NarrativeAction = {
   type: 'launch_vr_experience',
-  experienceId: 'quillforge-webui',
-  projectTwo: {
-    schemaVersion: 1,
-    themeId: 'observation-reality',
-    roleId: 'witness',
-  },
+  experienceId: 'narrative-engine-webui',
 };
 assert.deepEqual(approvedAction, {
   type: 'launch_vr_experience',
-  experienceId: 'quillforge-webui',
-  projectTwo: {
-    schemaVersion: 1,
-    themeId: 'observation-reality',
-    roleId: 'witness',
-  },
+  experienceId: 'narrative-engine-webui',
 });
 assert.deepEqual(ACTION_SCHEMA.launch_vr_experience, {
-  params: ['experienceId', 'projectTwo'],
-  required: ['experienceId', 'projectTwo'],
+  params: ['experienceId'],
+  required: ['experienceId'],
   ref: null,
 });
 
@@ -36,7 +26,7 @@ const engineSource = readFileSync(
 );
 assert.match(engineSource, /import \{ prepareVrExperience \}/u);
 assert.match(engineSource, /case 'launch_vr_experience': \{/u);
-assert.match(engineSource, /this\.minigameOverlay\.openWebExperience\(/u);
+assert.match(engineSource, /window\.location\.assign\(prepared\.url\)/u);
 assert.doesNotMatch(engineSource, /window\.open/u);
 assert.doesNotMatch(engineSource, /about:blank/u);
 assert.doesNotMatch(engineSource, /允许弹窗|新窗口没有出现/u);
@@ -49,10 +39,10 @@ assert.ok(launchCaseMatch);
 const launchCase = launchCaseMatch[1];
 assert.equal((launchCase.match(/prepareVrExperience\(/gu) ?? []).length, 1);
 assert.equal(
-  (launchCase.match(/this\.minigameOverlay\.openWebExperience\(/gu) ?? [])
-    .length,
+  (launchCase.match(/window\.location\.assign\(/gu) ?? []).length,
   1,
 );
+assert.equal(launchCase.includes('openWebExperience'), false);
 for (const forbiddenStateMutation of [
   'progressManager',
   'questManager',
@@ -70,21 +60,19 @@ for (const forbiddenStateMutation of [
   );
 }
 
-for (const message of [
-  '入口参数没有通过校验，我没有接入这份简报。请重新选择。',
-  '项目二链路正在舱内载入；世界书仍需由你审阅确认。',
-  '已退出项目二，返回 VR 实验室。',
-]) {
-  assert.equal(engineSource.includes(message), true);
-}
+assert.equal(
+  engineSource.includes('入口参数没有通过校验，无法接入编织台。请重新选择。'),
+  true,
+);
 
 const dialogueDataSource = readFileSync(
   new URL('../src/data/dialogues.ts', import.meta.url),
   'utf8',
 );
 assert.doesNotMatch(dialogueDataSource, /新窗口/u);
-assert.match(dialogueDataSource, /沉浸舱会先呈现世界书摘要/u);
-assert.match(dialogueDataSource, /确认这份简报，接入项目二/u);
+assert.match(dialogueDataSource, /确认，进入编织世界/u);
+assert.match(dialogueDataSource, /直接切回项目二的工作台/u);
+assert.doesNotMatch(dialogueDataSource, /p2_theme/u);
 
 const dialogueSource = readFileSync(
   new URL('../src/systems/dialogue.ts', import.meta.url),

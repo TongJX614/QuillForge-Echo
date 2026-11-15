@@ -16,7 +16,7 @@ async function filesUnder(directory) {
 
 export async function collectContentViolations(root, manifest) {
   const declared = manifest.entries.map((entry) => resolve(root, entry.path));
-  const publicRoots = [resolve(root, 'apps/echo/public'), resolve(root, 'apps/quillforge/samples')];
+  const publicRoots = [resolve(root, 'apps/echo/public')];
   const violations = [];
   for (const publicRoot of publicRoots) {
     for (const file of await filesUnder(publicRoot)) {

@@ -9,6 +9,7 @@ export class NotificationUI {
   private container: HTMLElement | null = null;
   private notificationEls: Map<number, HTMLElement> = new Map();
   private lastHash = '';
+  private lastTop = -1;
 
   constructor(parent: HTMLElement, _system: NotificationSystem) {
     void _system;
@@ -19,6 +20,7 @@ export class NotificationUI {
       right: '40px',
       display: 'flex',
       flexDirection: 'column',
+      alignItems: 'flex-end',
       gap: '8px',
       zIndex: '200',
       maxWidth: '340px',
@@ -27,11 +29,24 @@ export class NotificationUI {
     parent.appendChild(this.container);
   }
 
+  /** 通知固定贴右，并整体下移到任务面板下方，避免与「当前任务」重叠 */
+  private syncOffset(): void {
+    if (!this.container) return;
+    const panel = document.getElementById('quest-ui');
+    const panelBottom = panel ? panel.getBoundingClientRect().bottom : 0;
+    const top = Math.max(160, Math.ceil(panelBottom) + 14);
+    if (top !== this.lastTop) {
+      this.lastTop = top;
+      this.container.style.top = `${top}px`;
+    }
+  }
+
   /**
    * 渲染通知列表（增量更新，只增删变化的通知）
    */
   update(system: NotificationSystem): void {
     if (!this.container) return;
+    this.syncOffset();
 
     const notifications = system.getAll();
 
@@ -53,7 +68,7 @@ export class NotificationUI {
       if (!currentIds.has(id)) {
         el.style.transition = 'opacity 0.3s, transform 0.3s';
         el.style.opacity = '0';
-        el.style.transform = 'translateX(40px)';
+        el.style.transform = el.dataset.type === 'quest' ? 'translateY(10px)' : 'translateX(40px)';
         setTimeout(() => el.remove(), 300);
         this.notificationEls.delete(id);
       }
@@ -63,7 +78,7 @@ export class NotificationUI {
     for (const n of notifications) {
       if (!this.notificationEls.has(n.id)) {
         const el = this.createNotificationEl(n);
-        this.container.appendChild(el);
+        this.container?.appendChild(el);
         this.notificationEls.set(n.id, el);
       }
     }
@@ -99,7 +114,7 @@ export class NotificationUI {
       clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 100%, 0 100%)',
       transition: 'opacity 0.3s, transform 0.3s',
       opacity: '0',
-      transform: 'translateX(40px)',
+      transform: n.type === 'quest' ? 'translateY(14px)' : 'translateX(40px)',
     });
 
     // 图标
@@ -124,7 +139,7 @@ export class NotificationUI {
     // 触发淡入动画
     requestAnimationFrame(() => {
       el.style.opacity = '1';
-      el.style.transform = 'translateX(0)';
+      el.style.transform = n.type === 'quest' ? 'translateY(0)' : 'translateX(0)';
     });
 
     return el;

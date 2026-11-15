@@ -92,7 +92,7 @@ const providerFetch: typeof fetch = async (input, init) => {
 async function main(): Promise<void> {
   const app = express();
   app.use(express.json());
-  registerChatRoutes(app, chatConfig, { fetch: providerFetch });
+  registerChatRoutes(app, chatConfig, { fetch: providerFetch, engineBase: null });
   registerQuestRoutes(app, questConfig, { fetch: providerFetch });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');

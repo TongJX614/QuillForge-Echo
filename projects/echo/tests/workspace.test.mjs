@@ -6,22 +6,21 @@ import test from 'node:test';
 
 import { buildServiceSpecs, findWorkspaceRoot, resolveEnvFile } from '../scripts/lib/workspace.mjs';
 
-test('finds root markers and passes one absolute env file to both services', async () => {
+test('finds root markers and passes one absolute env file to the echo service', async () => {
   const root = await mkdtemp(join(tmpdir(), 'gewuzaojing-workspace-'));
   try {
     await mkdir(join(root, 'shared', 'contracts'), { recursive: true });
     await mkdir(join(root, 'apps', 'echo'), { recursive: true });
-    await mkdir(join(root, 'apps', 'quillforge'), { recursive: true });
     await writeFile(join(root, 'package.json'), '{}');
     await writeFile(join(root, 'shared', 'contracts', 'environment.json'), '{}');
     assert.equal(findWorkspaceRoot(join(root, 'apps', 'echo')), resolve(root));
     const envFile = resolveEnvFile(root, {});
     assert.equal(envFile, resolve(root, '.env'));
     assert.equal(isAbsolute(envFile), true);
-    const specs = buildServiceSpecs(root, envFile, 'python-test');
-    assert.equal(specs.length, 2);
+    const specs = buildServiceSpecs(root, envFile);
+    assert.equal(specs.length, 1);
     assert.deepEqual(new Set(specs.map((spec) => spec.env.GEWUZAOJING_ENV_FILE)), new Set([envFile]));
-    assert.deepEqual(specs.map((spec) => spec.port), [8050, 5000]);
+    assert.deepEqual(specs.map((spec) => spec.port), [5000]);
     if (process.platform === 'win32') {
       const echo = specs.find((spec) => spec.name === 'echo');
       assert.equal(echo.command, process.execPath);

@@ -1,19 +1,5 @@
-export type ProjectTwoThemeId =
-  | 'observation-reality'
-  | 'memory-identity'
-  | 'energy-civilization';
-
-export type ProjectTwoRoleId = 'witness' | 'calibrator' | 'participant';
-
-export interface ProjectTwoSelection {
-  schemaVersion: 1;
-  themeId: ProjectTwoThemeId;
-  roleId: ProjectTwoRoleId;
-}
-
 export interface LaunchVrExperienceRequest {
-  experienceId: 'quillforge-webui';
-  projectTwo: ProjectTwoSelection;
+  experienceId: 'narrative-engine-webui';
 }
 
 export type PreparedVrExperience =

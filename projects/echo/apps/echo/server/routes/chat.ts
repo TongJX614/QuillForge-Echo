@@ -130,16 +130,70 @@ function parseAIResponse(raw: string, npcId: string): {
   };
 }
 
+/**
+ * 优先把 NPC 自由对话转发给 叙事引擎 引擎（/api/echo/chat）。
+ * 引擎不可达时返回 false，由调用方回退到直连 LLM 的旧路径。
+ */
+async function proxyChatToEngine(engineBase: string, body: Record<string, unknown>, res: import('express').Response): Promise<boolean> {
+  const context = (body.context ?? {}) as {
+    sceneId?: string; stage?: string; flags?: string[]; questProgress?: unknown[];
+  };
+  const payload = {
+    npcId: body.npcId,
+    npcName: body.npcName,
+    message: body.message,
+    history: body.history ?? [],
+    scene: context.sceneId ?? '',
+    stage: context.stage ?? '',
+    flags: context.flags ?? [],
+    quests: context.questProgress ?? [],
+  };
+
+  let engineResp: Response;
+  try {
+    engineResp = await fetch(`${engineBase}/api/echo/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(90000),
+    });
+  } catch (err) {
+    console.warn('[chat] 引擎不可达，回退直连 LLM:', err instanceof Error ? err.message : err);
+    return false;
+  }
+
+  if (!engineResp.ok || !engineResp.body) {
+    await engineResp.body?.cancel();
+    console.warn(`[chat] 引擎返回 HTTP ${engineResp.status}，回退直连 LLM`);
+    return false;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  const reader = engineResp.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(decoder.decode(value, { stream: true }));
+  }
+  res.end();
+  return true;
+}
+
 export function registerChatRoutes(
   app: Express,
   config: OpenAiCompatibleTaskConfig,
-  dependencies: Readonly<{ fetch?: typeof fetch }> = {},
+  dependencies: Readonly<{ fetch?: typeof fetch; engineBase?: string | null }> = {},
 ): void {
   const providerFetch = dependencies.fetch ?? globalThis.fetch;
+  const engineBase = dependencies.engineBase?.replace(/\/+$/, '') || null;
   const endpoint = buildChatCompletionsUrl(config.connection.baseUrl);
   const authorization = createAuthorizationHeader(config.connection.apiKey);
 
   app.post('/api/chat', async (req, res) => {
+    if (engineBase && await proxyChatToEngine(engineBase, req.body ?? {}, res)) return;
     const message = req.body.message;
     const npcId = req.body.npcId || '';
     const npcName = req.body.npcName || npcId;

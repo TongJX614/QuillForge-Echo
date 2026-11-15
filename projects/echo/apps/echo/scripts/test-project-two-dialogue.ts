@@ -6,15 +6,6 @@ import {
   DIALOGUE_VR_DEVICE_CG,
   type DialogueChoice,
 } from '../src/data/dialogues';
-import {
-  getProjectTwoCanonicalBrief,
-  PROJECT_TWO_ROLE_LABELS,
-  PROJECT_TWO_THEME_LABELS,
-} from '../src/data/vr-experiences';
-import type {
-  ProjectTwoRoleId,
-  ProjectTwoThemeId,
-} from '../src/types/vr-experience';
 
 const deviceTrees = ALL_DIALOGUES.filter(
   tree => tree.scene === 'vr' && tree.trigger === 'vr_device_event',
@@ -65,115 +56,49 @@ assert.deepEqual(
     { text: '暂时离开', next: 'node_vr_decline' },
   ],
 );
-assert.equal(tree.nodes.p2_intro.choices?.[2]?.next, 'node_vr_choose_experience');
-assert.equal(
-  tree.nodes.p2_difference.choices?.[1]?.next,
-  'node_vr_choose_experience',
-);
 
-const themes = Object.keys(PROJECT_TWO_THEME_LABELS) as ProjectTwoThemeId[];
-const roles = Object.keys(PROJECT_TWO_ROLE_LABELS) as ProjectTwoRoleId[];
-const themeNodeIds: Record<ProjectTwoThemeId, string> = {
-  'observation-reality': 'p2_role_observation',
-  'memory-identity': 'p2_role_memory',
-  'energy-civilization': 'p2_role_energy',
-};
-const confirmPrefix: Record<ProjectTwoThemeId, string> = {
-  'observation-reality': 'observation',
-  'memory-identity': 'memory',
-  'energy-civilization': 'energy',
-};
+// 世界编织：无预选，确认即直跳
+const introNode = tree.nodes.p2_intro;
+assert.ok(introNode);
+assert.equal(introNode.choices?.length, 2);
+const [launchChoice, backChoice] = introNode.choices as DialogueChoice[];
+assert.equal(launchChoice.text, '确认，进入编织世界。');
+assert.equal(launchChoice.next, 'p2_after_launch');
+assert.deepEqual(launchChoice.actions, [
+  { type: 'launch_vr_experience', experienceId: 'narrative-engine-webui' },
+]);
+assert.equal(backChoice.text, '返回装置选择。');
+assert.equal(backChoice.next, 'node_vr_choose_experience');
+assert.equal(backChoice.actions, undefined);
 
-const reachedConfirmNodes = new Set<string>();
-for (const themeId of themes) {
-  const roleNode = tree.nodes[themeNodeIds[themeId]];
-  assert.ok(roleNode);
-  assert.equal(roleNode.choices?.length, 3);
-  for (const choice of roleNode.choices ?? []) {
-    reachedConfirmNodes.add(choice.next);
-  }
-
-  for (const roleId of roles) {
-    const suffix = `${confirmPrefix[themeId]}_${roleId}`;
-    const confirmId = `p2_confirm_${suffix}`;
-    const modifyId = `p2_modify_${suffix}`;
-    const confirmNode = tree.nodes[confirmId];
-    const modifyNode = tree.nodes[modifyId];
-    assert.ok(confirmNode, confirmId);
-    assert.ok(modifyNode, modifyId);
-    const selection = { schemaVersion: 1, themeId, roleId } as const;
-    const brief = getProjectTwoCanonicalBrief(selection);
-    assert.ok(brief);
-    assert.deepEqual(
-      confirmNode.lines.map(line => line.text),
-      [
-        '坐标已经成形。我把你的选择收束成了这份简报。',
-        brief,
-        '它不是既定剧情，只是生成时必须守住的起点。QuillForge 会据此扩展人物、地点与事件；沉浸舱会先呈现世界书摘要，等你审阅后再决定是否进入。',
-      ],
-    );
-    assert.equal(confirmNode.choices?.length, 3);
-    const [launchChoice, changeChoice, declineChoice] =
-      confirmNode.choices as DialogueChoice[];
-    assert.equal(
-      launchChoice.text,
-      '确认这份简报，接入项目二。',
-    );
-    assert.equal(launchChoice.next, 'p2_after_launch');
-    assert.equal(changeChoice.next, modifyId);
-    assert.equal(declineChoice.next, 'p2_decline');
-    assert.equal(launchChoice.actions?.length, 1);
-    const [action] = launchChoice.actions ?? [];
-    assert.deepEqual(action, {
-      type: 'launch_vr_experience',
-      experienceId: 'quillforge-webui',
-      projectTwo: selection,
-    });
-    assert.deepEqual(Object.keys(action).sort(), [
-      'experienceId',
-      'projectTwo',
-      'type',
-    ]);
-    assert.deepEqual(Object.keys(action.projectTwo).sort(), [
-      'roleId',
-      'schemaVersion',
-      'themeId',
-    ]);
-    assert.equal(JSON.stringify(action).includes('prompt'), false);
-    assert.equal(JSON.stringify(action).includes('url'), false);
-    assert.equal(JSON.stringify(action).includes('path'), false);
-    assert.equal(JSON.stringify(action).includes('key'), false);
-    assert.equal(JSON.stringify(action).includes('script_id'), false);
-    assert.deepEqual(
-      modifyNode.choices?.map(choice => choice.next),
-      ['p2_theme', themeNodeIds[themeId], confirmId],
-    );
-    assert.equal(
-      modifyNode.choices?.some(choice => choice.actions?.length),
-      false,
-    );
-  }
+for (const removedNode of [
+  'p2_theme',
+  'p2_difference',
+  'p2_role_observation',
+  'p2_role_memory',
+  'p2_role_energy',
+  'p2_decline',
+]) {
+  assert.equal(tree.nodes[removedNode], undefined, removedNode);
 }
-assert.equal(reachedConfirmNodes.size, 9);
+assert.equal(
+  Object.keys(tree.nodes).filter(
+    id => id.startsWith('p2_confirm_') || id.startsWith('p2_modify_'),
+  ).length,
+  0,
+);
 
 const launchChoices = Object.values(tree.nodes)
   .flatMap(node => node.choices ?? [])
   .filter(choice =>
     choice.actions?.some(action => action.type === 'launch_vr_experience'),
   );
-assert.equal(launchChoices.length, 9);
+assert.equal(launchChoices.length, 1);
 assert.deepEqual(
   tree.nodes.p2_after_launch.lines.map(line => line.text),
-  ['项目二已经接入沉浸舱。世界书是否生成完成、是否进入故事，都以舱内实际显示为准。'],
+  ['正在切回 叙事引擎 编织台。世界的坐标，等你落笔。'],
 );
 assert.equal(tree.nodes.p2_after_launch.choices, undefined);
-assert.deepEqual(
-  tree.nodes.p2_decline.lines.map(line => line.text),
-  [
-    '当然。装置不会替你作决定。等你有一个真正想追问的问题，再回来。',
-    '索尔维会议体验仍按原来的方式开放。',
-  ],
-);
 
 assert.equal(
   DIALOGUE_VR_DEVICE_CG.nodes.node_vr_enter.choices?.[0]?.next,
@@ -195,8 +120,17 @@ const dialogueUiSource = readFileSync(
 );
 assert.equal(
   [...dialogueUiSource.matchAll(/researcher:\s*'VR研究员'/gu)].length,
-  3,
-  'researcher display name must stay consistent in the dialogue, history, and notification views',
+  2,
+  'researcher display name must stay consistent in the dialogue and history views',
+);
+const questUiSource = readFileSync(
+  new URL('../src/ui/quest-ui.ts', import.meta.url),
+  'utf8',
+);
+assert.equal(
+  [...questUiSource.matchAll(/researcher:\s*'VR研究员'/gu)].length,
+  1,
+  'researcher display name must stay consistent in the notification view',
 );
 
 console.log('PROJECT_TWO_DIALOGUE=PASS');

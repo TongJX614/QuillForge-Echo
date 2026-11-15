@@ -10,6 +10,19 @@ import { NPC } from '../entities/npc';
 import { InteractiveItem } from '../entities/item';
 import { DialogueSystem } from '../systems/dialogue';
 import { DialogueRegistry } from '../systems/dialogue-registry';
+import {
+  generateEngineDialogue,
+  requestEngineEnding,
+  resetEngineSession,
+  generateEngineBackground,
+  synthesizeEngineVoice,
+  fetchEngineObjectUrl,
+  continueEngineDialogue,
+  type EngineDialogueResult,
+  type EngineWorldContext,
+  type EngineDialogueRequest,
+  type EngineQuestSuggestion,
+} from '../systems/engine-dialogue';
 import { QuestManager, validateQuestDefinition } from '../systems/quest';
 import { ProgressManager } from '../systems/progress';
 import { StageManager, STAGE_ORDER, stageIdToNumber as stageToNumber } from '../systems/stage-manager';
@@ -20,13 +33,14 @@ import { QuestUI } from '../ui/quest-ui';
 import { NotificationSystem } from '../systems/notifications';
 import { NotificationUI } from '../ui/notification-ui';
 import { MinigameOverlay } from '../ui/minigame-overlay';
+import { openEchoMinigame, type EchoMinigameConfig } from '../ui/echo-minigame';
 import { playSolvayIntroVideo, setSolvayIntroPaused } from '../ui/solvay-intro';
 import { SystemMenu } from '../ui/system-menu';
 import { ALL_SCENES } from '../scenes/scenes';
 import { SceneDef } from '../scenes/scene';
-import type { DialogueTree } from '../data/dialogues';
+import type { DialogueTree, DialogueChoice, DialogueNode } from '../data/dialogues';
 import { CHARACTERS } from '../data/characters';
-import type { StartConditionEntry } from '../data/quests/types';
+import type { StartConditionEntry, Quest } from '../data/quests/types';
 import type { NarrativeAction, ConditionContext } from '../systems/condition-action';
 import { evaluateStartConditionEntry, legacyEffectToActions } from '../systems/condition-action';
 import { PathfindingSystem } from '../systems/pathfinding';
@@ -71,6 +85,15 @@ const MINIGAME_COMPLETIONS: Record<string, { flag: string; nextTreeId: string }>
   'slit-rebuttal': { flag: 'slit_rebuttal_done', nextTreeId: 'dlg_cg_solvay_debate' },
   'photon-box': { flag: 'photon_box_done', nextTreeId: 'dlg_cg_solvay_final_debate' },
 };
+
+// 承载进度机制的选项动作：含这些动作的对白树必须本地播放，避免引擎替换丢失门控/转场
+const MECHANICAL_ACTIONS = new Set<string>([
+  'minigame.open', 'launch_vr_experience',
+  'quest.activate', 'quest.complete',
+  'inventory.add', 'inventory.remove', 'inventory.submit',
+  'scene.unlock', 'dialogue.unlock', 'stage.set', 'worldline.set',
+  'event.emit', 'exp.add',
+]);
 
 export interface GameEngineOptions {
   initialSave?: SaveEnvelope;
@@ -117,6 +140,8 @@ export class GameEngine {
   private stageStateReady: Promise<void>;
   private readonly options: GameEngineOptions;
   private readonly saveStore: SaveGameStore;
+  // 读档时任务定义可能尚未由 Quest Editor 异步注册，暂存快照待注册后补恢复
+  private pendingQuestRestore: ReturnType<QuestManager['serialize']> | null = null;
 
   // 场景切换动画
   private transitioning: boolean = false;
@@ -149,10 +174,45 @@ export class GameEngine {
   private talkedSet: Set<string> = new Set();
   private collectedSet: Set<string> = new Set();
   private activeDialogueSource: { kind: 'npc' | 'event'; entityId: string; questTargetId: string } | null = null;
+  // 引擎对白管线：内容由 叙事引擎 生成，进度仍由 ECHO 的任务/阶段/flags 管理
+  private engineSessionId = 'echo-main';
+  // 背景轮次 ID：绑定到当前存档（存档内含 asset_run_id 旗标）；新档生成新的，读档沿用
+  private runId = '';
+  private engineDialoguePending = false;
+  private finaleDialoguePending = false;
+  private finaleCgUrl = '';
+  private endingTriggered = false;
+  // 当前对白是否来自引擎（决定选完后是否请求动态续写）
+  private activeTreeFromEngine = false;
+  // 插入式小游戏：对话说完、进入选项前触发，通关后继续对话
+  private pendingMiniGame: EchoMinigameConfig | null = null;
+  private miniGamePlayed = false;
+  private miniGameOpening = false;
+  // 引擎从本场对话内容里识别出的“去问某人”建议，对话结束后由 ECHO 校验派发支线
+  private pendingSuggestion: EngineQuestSuggestion | null = null;
+  // 近期剧情/选择记录，作为世界状态喂给引擎，保证续写不跑偏
+  private recentTranscript: { speaker: string; text: string; sceneId: string }[] = [];
+  private recentChoices: { text: string; sceneId: string }[] = [];
+  // 引擎生成的场景背景（仅作对话背景板；探索仍用原始俯视地图）
+  private readonly sceneBgCache = new Map<string, string>();
+  private readonly sceneBgPromise = new Map<string, Promise<string | null>>();
+  // 引擎 TTS 语音（默认关闭：延迟过大，暂停使用；如需恢复改为 true）
+  private ttsAudio: HTMLAudioElement | null = null;
+  private ttsEnabled = false;
+  private ttsToken = 0;
+  private readonly ttsCache = new Map<string, string>();
+  private readonly ttsInflight = new Map<string, Promise<string | null>>();
+  // 引擎生成等待处理：加载遮罩 + 去重缓存 + 进场预生成
+  private engineLoadingEl: HTMLDivElement | null = null;
+  private readonly dialogueCache = new Map<string, EngineDialogueResult>();
+  private readonly dialogueInflight = new Map<string, Promise<EngineDialogueResult | null>>();
+  private prefetchingScene: string | null = null;
   private lastQuestLocationKey = '';
   private editorQuestIds = new Set<string>();
   private editorEntityIds = new Set<string>();
   private editorNpcTargets = new Map<string, string>();
+  // 本局专属的动态支线任务定义（随存档保存；不影响主线）
+  private readonly dynamicQuests = new Map<string, Quest>();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -258,7 +318,11 @@ export class GameEngine {
     // 初始化 UI
     this.dialogueUI = new DialogueUI(this.dialogueSystem, container);
     this.dialogueUI.setCallbacks(
-      () => this.dialogueSystem.advance(),
+      () => {
+        // 到达小游戏插入时机则挂起并触发；否则正常推进
+        if (!this.minigameGate()) return;
+        this.dialogueSystem.advance();
+      },
       (idx: number) => {
         const choices = this.dialogueSystem.state.choices;
         if (choices && choices[idx]) {
@@ -275,10 +339,19 @@ export class GameEngine {
             void this.enterSolvayCinematic();
             return;
           }
+          // 引擎对白 / 无固定后续节点的选项：选完后让角色针对该选择继续回应/解释
+          if (this.activeTreeFromEngine || !choice.next) {
+            void this.continueAfterChoice(choice);
+            return;
+          }
+          this.recentChoices.push({ text: choice.text, sceneId: this.currentSceneId });
+          if (this.recentChoices.length > 8) this.recentChoices = this.recentChoices.slice(-8);
           this.dialogueSystem.choose(choice);
         }
       },
     );
+    this.dialogueUI.onLineStart = (payload) => this.speakLine(payload);
+    this.dialogueUI.onLinesComplete = () => this.minigameGate();
     this.dialogueUI.onAIDialogue = (node: import('../data/dialogues').DialogueNode, replyNodes?: import('../data/dialogues').DialogueNode[]) => {
       if (!this.dialogueSystem.isActive) return;
       this.dialogueSystem.injectNode(node, replyNodes);
@@ -288,7 +361,7 @@ export class GameEngine {
       const npc = this.currentScene.npcs.find(n => n.entity.id === entityId);
       const key = npc?.entity.id ?? entityId;
       const ch = CHARACTERS[key];
-      return ch?.name ?? key;
+      return ch?.name ?? npc?.entity.name ?? key;
     };
     this.dialogueUI.onGetAIContext = () => ({
       playerName: '苏然',
@@ -721,6 +794,7 @@ export class GameEngine {
       inventory: this.inventorySystem.serialize(),
       progress: this.progressManager.serialize(),
       quests: this.questManager.serialize(),
+      dynamicQuests: [...this.dynamicQuests.values()],
       world: {
         talkedEntityIds: [...this.talkedSet].sort(),
         collectedEntityIds: [...this.collectedSet].sort(),
@@ -750,7 +824,18 @@ export class GameEngine {
 
       await this.activateSavedScene(snapshot);
       this.restoreWorldEntities(snapshot.world);
-      this.questManager.restore(snapshot.quests);
+      // 先重新注册本存档的动态支线定义，再恢复任务运行时
+      this.dynamicQuests.clear();
+      for (const q of snapshot.dynamicQuests ?? []) {
+        this.dynamicQuests.set(q.id, q);
+        this.questManager.registerQuest(q, true);
+      }
+      // 任务定义由 Quest Editor 异步加载：尚未注册时不丢弃存档运行时，等注册完成后再恢复
+      if ((snapshot.quests?.questRuntimes?.length ?? 0) > 0 && this.questManager.getDefinitions().length === 0) {
+        this.pendingQuestRestore = snapshot.quests;
+      } else {
+        this.questManager.restore(snapshot.quests);
+      }
       this.refreshRuntimeViews();
     } finally {
       this.restoringSave = false;
@@ -918,7 +1003,14 @@ export class GameEngine {
     this.editorNpcTargets.clear();
 
     for (const placement of project.placements) this.addQuestEditorPlacement(placement);
-    this.questManager.refreshAutoStarts();
+    if (this.pendingQuestRestore) {
+      const pending = this.pendingQuestRestore;
+      this.pendingQuestRestore = null;
+      this.questManager.restore(pending);
+      this.refreshRuntimeViews();
+    } else {
+      this.questManager.refreshAutoStarts();
+    }
     this.applyDialogueData(project.dialogueData);
     // base 唯一捕获时机：启动时从静态场景定义建立，此后不再重复捕获
     for (const scene of Object.values(ALL_SCENES)) {
@@ -1303,6 +1395,9 @@ export class GameEngine {
       case 'quest.complete':
         this.questManager.forceCompleteQuest(action.questId);
         break;
+      case 'quest.dispatch':
+        this.dispatchSideQuest(action);
+        break;
       case 'inventory.add':
         this.inventorySystem.addItem(action.itemId, action.count ?? 1);
         this.notificationSystem.show(`获得：${ALL_ITEMS[action.itemId]?.name ?? action.itemId} ×${action.count ?? 1}`, 'pickup');
@@ -1348,32 +1443,15 @@ export class GameEngine {
       case 'launch_vr_experience': {
         const prepared = prepareVrExperience({
           experienceId: action.experienceId,
-          projectTwo: action.projectTwo,
         });
         if (prepared.status === 'invalid') {
           this.notificationSystem.show(
-            '入口参数没有通过校验，我没有接入这份简报。请重新选择。',
+            '入口参数没有通过校验，无法接入编织台。请重新选择。',
             'danger',
           );
           break;
         }
-        this.minigameOverlay.openWebExperience(
-          {
-            id: 'quillforge-webui',
-            title: '项目二 · 世界编织',
-            src: prepared.url,
-          },
-          () => {
-            this.notificationSystem.show(
-              '已退出项目二，返回 VR 实验室。',
-              'info',
-            );
-          },
-        );
-        this.notificationSystem.show(
-          '项目二链路正在舱内载入；世界书仍需由你审阅确认。',
-          'info',
-        );
+        window.location.assign(prepared.url);
         break;
       }
       case 'minigame.open': {
@@ -1386,7 +1464,7 @@ export class GameEngine {
           this.progressManager.setFlag(completion.flag);
           const nextTree = this.dialogueRegistry.get(completion.nextTreeId);
           if (nextTree) {
-            this.dialogueSystem.start(nextTree);
+            this.startScriptedTree(nextTree);
           } else {
             console.warn('[Engine] next dialogue tree not found:', completion.nextTreeId);
           }
@@ -1408,10 +1486,19 @@ export class GameEngine {
 
   /** 对话系统结束回调：在真正读完对话后再推进 talk_to_npc。 */
   private handleDialogueCompleted(tree: DialogueTree): void {
+    // 对话结束即停掉当前语音
+    this.ttsToken++;
+    if (this.ttsAudio) { this.ttsAudio.pause(); this.ttsAudio = null; }
     const source = this.activeDialogueSource;
     this.activeDialogueSource = null;
-    if (!source) return;
-    if (source.kind === 'npc') {
+    const suggestion = this.pendingSuggestion;
+    this.pendingSuggestion = null;
+    // 在派发 dialogue_completed 之前判断：本场是否就是某条动态支线的目标对话
+    const wasDynamicSideTarget = !!(source && source.kind === 'npc'
+      && this.isDynamicSideQuestTarget(source.questTargetId));
+    const wasFinale = this.finaleDialoguePending;
+    this.finaleDialoguePending = false;
+    if (source && source.kind === 'npc') {
       this.talkedSet.add(source.entityId);
       this.progressManager.setFlag(`talked:${source.questTargetId}`);
       const npc = this.currentScene.npcs.find((candidate) => candidate.entity.id === source.entityId);
@@ -1422,6 +1509,199 @@ export class GameEngine {
         dialogueId: tree.id,
       });
     }
+    if (wasFinale) {
+      void this.playEngineEnding();
+    } else {
+      // 本地最终辩论（光子箱路线）结束时补触发结局；引擎 final 路径已在上方处理
+      if (tree.id === 'dlg_cg_solvay_final_debate' && !this.endingTriggered) {
+        void this.playEngineEnding();
+      }
+      // 研究员类对话的小游戏节奏：没触发小游戏就记一笔，下次研究员对话补上
+      this.updateMinigameCadence(source, tree);
+      // 引擎从对话内容里识别到“去问某人”时，由 ECHO 校验并派发多目标任务
+      this.maybeDispatchSuggestedQuest(source, tree, suggestion, wasDynamicSideTarget);
+      // 对话后状态已变化，重新预热本场景剩余 NPC 对白
+      void this.prefetchSceneDialogues();
+    }
+  }
+
+  /** 主线终局：由引擎按 flags/stats/选择历史匹配结局并播放。 */
+  private async playEngineEnding(): Promise<void> {
+    if (this.endingTriggered) return;
+    this.endingTriggered = true;
+    this.showEngineLoading('正在结算命运…');
+    let result: Awaited<ReturnType<typeof requestEngineEnding>> = null;
+    try {
+      result = await requestEngineEnding({
+        sessionId: this.engineSessionId,
+        scene: this.currentSceneId,
+        flags: Array.from(this.progressManager['flags'] as Set<string>),
+        eventType: this.finaleCgUrl ? 'event_type2' : 'event_type1',
+        cgUrl: this.finaleCgUrl,
+      });
+    } finally {
+      this.hideEngineLoading();
+    }
+    if (!result) {
+      this.endingTriggered = false;
+      return;
+    }
+    if (result.ending) {
+      this.notificationSystem.show(`结局：${result.ending.title}`, 'quest', 5000);
+    }
+    if (result.tree) {
+      this.pendingSuggestion = null;
+      this.activeDialogueSource = null;
+      this.activeTreeFromEngine = false;
+      this.beginDialogueMinigame(null);
+      this.recordTranscript(result.tree);
+      this.dialogueSystem.start(result.tree);
+    }
+  }
+
+  /**
+   * 研究员类闲聊的小游戏节奏：本场没有小游戏就置 mg_due:<scene>，
+   * 下一次研究员对话由引擎补一个；本场有小游戏则清掉欠账。
+   * 约每 1-2 场研究员对话出现一次小游戏。
+   */
+  private updateMinigameCadence(
+    source: { kind: 'npc' | 'event'; entityId: string; questTargetId: string } | null,
+    tree: DialogueTree,
+  ): void {
+    if (!source || source.kind !== 'npc') return;
+    if (tree.eventType === 'event_type2' || tree.cgUrl) return;
+    // 重复催办/致谢类对话不打断，其余探索场景对话都计入节奏（提高出现频率）
+    if (/(?:_urge|_thanks)$/.test(tree.id)) return;
+    const researcher = /(?:scientist|researcher)/i.test(`${source.questTargetId} ${source.entityId}`);
+    if (this.currentSceneId === 'solvay' && !researcher) return;
+    this.progressManager.setFlag(`mg_due:${this.currentSceneId}`);
+  }
+
+  /** 判断某个 NPC 是否正被一条进行中的动态支线要求拜访（用于断掉支线链）。 */
+  private isDynamicSideQuestTarget(npcId: string): boolean {
+    if (!npcId) return false;
+    for (const quest of this.dynamicQuests.values()) {
+      const runtime = this.questManager.getRuntime(quest.id);
+      if (!runtime || runtime.status !== 'active') continue;
+      const step = quest.steps[runtime.currentStepIndex];
+      for (const objective of step?.objectives ?? []) {
+        if (objective.type === 'talk_to_npc' && objective.target === npcId) return true;
+      }
+    }
+    return false;
+  }
+
+  private hasActiveDynamicQuest(): boolean {
+    return [...this.dynamicQuests.values()]
+      .some((quest) => this.questManager.getRuntime(quest.id)?.status === 'active');
+  }
+
+  /** 引擎在对话里建议“去问某人”时：校验在场/可对话/未聊过，生成一条有限目标支线。 */
+  private maybeDispatchSuggestedQuest(
+    source: { kind: 'npc' | 'event'; entityId: string; questTargetId: string } | null,
+    tree: DialogueTree,
+    suggestion: EngineQuestSuggestion | null,
+    wasDynamicSideTarget: boolean,
+  ): void {
+    if (!suggestion || !source || source.kind !== 'npc') return;
+    if (wasDynamicSideTarget) return; // 支线目标对话不再继续派生支线
+    if (tree.eventType === 'event_type2' || tree.cgUrl) return;
+    if (/(?:_quest|_urge|_thanks)$/.test(tree.id)) return;
+    if (tree.scene === 'vr') return;
+    if (this.hasActiveDynamicQuest()) return; // 同时只保留 1 条动态支线
+
+    const stage = this.progressManager.getStage();
+    const targets: { id: string; name: string }[] = [];
+    for (const candidate of suggestion.targets ?? []) {
+      const wanted = String(candidate?.id || '').trim();
+      if (!wanted) continue;
+      const npc = this.currentScene.npcs.find((n) =>
+        n.entity.id === wanted || this.editorNpcTargets.get(n.entity.id) === wanted);
+      if (!npc || npc.entity.id === source.entityId) continue;
+      if (this.talkedSet.has(npc.entity.id)) continue;
+      const npcTree = this.dialogueRegistry.resolve(this.currentSceneId, npc.dialogueTrigger, {
+        currentStage: stage,
+        checkCondition: this.makeTreeConditionChecker(),
+      });
+      if (!npcTree) continue;
+      const id = this.editorNpcTargets.get(npc.entity.id) ?? npc.entity.id;
+      if (!targets.some((t) => t.id === id)) targets.push({ id, name: npc.entity.name });
+      if (targets.length >= 2) break;
+    }
+    if (targets.length === 0) return;
+
+    const names = targets.map((t) => t.name).join('、');
+    const title = `去和${names}聊聊`;
+    const reason = String(suggestion.reason || '').trim();
+    const desc = reason || `对话里提到，${names}那边或许还有值得确认的线索。`;
+    this.createDynamicSideQuest(targets, title, desc);
+  }
+
+  /** 创建一条多目标“找人聊”的动态支线；只新增 side 任务，不影响主线。 */
+  private createDynamicSideQuest(
+    targets: { id: string; name: string }[],
+    title: string,
+    desc: string,
+    exp = 15,
+  ): void {
+    if (targets.length === 0) return;
+    if (this.hasActiveDynamicQuest()) {
+      this.notificationSystem.show('支线进行中，先完成当前支线吧', 'info', 2000);
+      return;
+    }
+    const names = targets.map((t) => t.name).join('、');
+    const id = `quest_dq_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    const quest: Quest = {
+      id,
+      title,
+      desc,
+      category: 'side',
+      autoStart: false,
+      steps: [
+        {
+          id: 'step_1',
+          desc: `去和${names}聊聊`,
+          objectives: targets.map((t) => ({ type: 'talk_to_npc' as const, target: t.id, count: 1 })),
+          logic: 'AND',
+          onCompleteText: `你和${names}聊过了。`,
+        },
+      ],
+      rewards: { exp: Math.max(10, Math.trunc(exp) * targets.length), flags: [`${id}_done`] },
+      completionText: `支线完成：${title}`,
+    };
+    this.dynamicQuests.set(id, quest);
+    this.questManager.registerQuest(quest, true);
+    this.questManager.activateQuest(id, true);
+    this.notificationSystem.show(`新支线：${title}`, 'quest', 3200);
+  }
+
+  /** 派发一条"本局专属"的动态支线（兼容选项动作）：只新增 side 任务，不推进阶段、不影响主线。 */
+  private dispatchSideQuest(action: Extract<NarrativeAction, { type: 'quest.dispatch' }>): void {
+    const target = String(action.targetNpc || '').trim();
+    if (!target) return;
+    if (this.hasActiveDynamicQuest()) {
+      this.notificationSystem.show('支线进行中，先完成当前支线吧', 'info', 2000);
+      return;
+    }
+    const targetName = action.targetName || CHARACTERS[target]?.name || target;
+    for (const quest of this.dynamicQuests.values()) {
+      const runtime = this.questManager.getRuntime(quest.id);
+      if (!runtime || runtime.status !== 'active') continue;
+      const first = quest.steps[runtime.currentStepIndex]?.objectives?.[0];
+      if (first && first.type === 'talk_to_npc' && first.target === target) {
+        this.notificationSystem.show(`已有去找${targetName}的支线`, 'info', 2000);
+        return;
+      }
+    }
+    const mainQuest = this.questManager.getActiveQuests()
+      .find((view) => view.definition.category === 'main');
+    const title = String(action.title || `去和${targetName}谈谈`);
+    const desc = String(action.desc
+      || (mainQuest
+        ? `与「${mainQuest.definition.title}」相关：去和${targetName}确认一些事情。`
+        : `有人希望你去和${targetName}确认一些事情。`));
+    const exp = Math.max(0, Math.trunc(Number(action.exp ?? 15)));
+    this.createDynamicSideQuest([{ id: target, name: targetName }], title, desc, exp);
   }
 
   /** 游戏其他模块统一从这里向任务引擎上报事件。 */
@@ -1471,14 +1751,28 @@ export class GameEngine {
       console.error('[Engine] 存档恢复失败：', error);
       this.notificationSystem.show('存档无法恢复，已进入新游戏。', 'danger');
     }
+    // 背景轮次绑定存档：读档沿用存档里的 runId（重载不换图）；新开档才生成新的
+    const savedRunId = this.readRunIdFromFlags();
+    if (savedRunId) {
+      this.runId = savedRunId;
+    } else {
+      this.runId = `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      this.progressManager.setFlag(`asset_run_id:${this.runId}`);
+    }
     this.booting = false;
     if (!restored) {
+      this.engineSessionId = `echo-${Date.now().toString(36)}`;
+      this.endingTriggered = false;
+      this.finaleDialoguePending = false;
+      void resetEngineSession(this.engineSessionId);
       this.reportQuestEvent({ type: 'scene_entered', sceneId: this.currentSceneId });
       this.progressManager.setFlag(`visited:${this.currentSceneId}`);
       this.reportPlayerLocationIfChanged();
     }
     this.running = true;
     this.lastTime = performance.now();
+    void this.maybeLoadEngineBackground(this.currentSceneId, this.currentScene.name);
+    void this.prefetchSceneDialogues();
     requestAnimationFrame((t) => this.loop(t));
   }
 
@@ -1761,6 +2055,8 @@ export class GameEngine {
     const fromSceneId = this.currentSceneId;
     this.currentSceneId = sceneId;
     this.currentScene = newScene;
+    void this.maybeLoadEngineBackground(sceneId, newScene.name);
+    void this.prefetchSceneDialogues();
     this.loadDevColliders();
 
     // ★ 关键：先等背景图加载完成，才能拿到正确的世界尺寸
@@ -1824,12 +2120,581 @@ export class GameEngine {
     source: { kind: 'npc' | 'event'; entityId: string; questTargetId: string },
   ): boolean {
     const tree = this.dialogueRegistry.resolve(this.currentSceneId, trigger, { currentStage: this.progressManager.getStage(), checkCondition: this.makeTreeConditionChecker() });
-    if (tree) {
+    if (!tree) return false;
+
+    // 引擎无法覆盖的确定性演出（VR 启动、索尔维入场、任务承接/催促/致谢）保持本地播放
+    if (this.shouldPlayDialogueLocally(tree)) {
+      this.pendingSuggestion = null;
       this.activeDialogueSource = source;
+      this.activeTreeFromEngine = false;
+      this.beginDialogueMinigame(tree.minigame ?? null);
+      this.recordTranscript(tree);
+      this.applyDialogueBackdrop(tree);
       this.dialogueSystem.start(tree);
       return true;
     }
+
+    // 其余对白由 叙事引擎 引擎生成；失败时回退本地树
+    void this.startEngineDialogue(tree, trigger, source);
+    return true;
+  }
+
+  /** 判断某棵对白树是否必须本地播放（固定剧本 / 机制演出，引擎不改写）。 */
+  private shouldPlayDialogueLocally(tree: DialogueTree): boolean {
+    // 剧本固定的剧情段落（CG 演出：报告/辩论/光子箱/终局等，带背景与既定回答）→ 用原剧本
+    if (tree.eventType === 'event_type2' || !!tree.cgUrl) return true;
+    if (/(?:_quest|_urge|_thanks)$/.test(tree.id)) return true;
+    if (tree.scene === 'vr') return true;
+    for (const node of Object.values(tree.nodes)) {
+      for (const choice of node.choices ?? []) {
+        if (choice.next?.startsWith('__')) return true;
+        if ((choice.actions ?? []).some((action) => MECHANICAL_ACTIONS.has(action.type))) return true;
+      }
+    }
     return false;
+  }
+
+  /** 脚本直接指定的后续对白（如小游戏通关后的 CG 树）：可生成则走引擎，否则本地播放。 */
+  private startScriptedTree(tree: DialogueTree): void {
+    const source = { kind: 'event' as const, entityId: tree.trigger, questTargetId: tree.trigger };
+    // 小游戏期间可能仍停留在上一棵对白树，先结束它，确保后续 CG 必定播放
+    if (this.dialogueSystem.isActive) this.dialogueSystem.end();
+    if (this.shouldPlayDialogueLocally(tree)) {
+      this.pendingSuggestion = null;
+      this.activeDialogueSource = source;
+      this.activeTreeFromEngine = false;
+      this.beginDialogueMinigame(tree.minigame ?? null);
+      this.recordTranscript(tree);
+      this.applyDialogueBackdrop(tree);
+      this.dialogueSystem.start(tree);
+      return;
+    }
+    void this.startEngineDialogue(tree, tree.trigger, source, true);
+  }
+
+  /** 请求引擎生成对白并播放；引擎不可达时回退本地对白树。 */
+  /** 引擎生成等待遮罩（覆盖层 + 旋转指示 + 文案）*/
+  private ensureEngineLoadingEl(): HTMLDivElement {
+    if (this.engineLoadingEl) return this.engineLoadingEl;
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:absolute;inset:0;z-index:130;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(6,10,18,0.72);color:#cfe3ff;font-family:monospace;pointer-events:auto;';
+    const style = document.createElement('style');
+    style.textContent = '@keyframes qfspin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+    el.appendChild(style);
+    const spinner = document.createElement('div');
+    spinner.textContent = '◌';
+    spinner.style.cssText = 'font-size:44px;line-height:1;animation:qfspin 1.1s linear infinite;';
+    const label = document.createElement('div');
+    label.className = 'qf-loading-label';
+    label.style.cssText = 'font-size:14px;letter-spacing:1px;text-align:center;max-width:70%;';
+    const hint = document.createElement('div');
+    hint.textContent = '引擎正在依据当前世界状态生成，请稍候…';
+    hint.style.cssText = 'font-size:12px;opacity:0.6;';
+    el.appendChild(spinner);
+    el.appendChild(label);
+    el.appendChild(hint);
+    this.gameContainer.appendChild(el);
+    this.engineLoadingEl = el;
+    return el;
+  }
+
+  private showEngineLoading(text: string): void {
+    const el = this.ensureEngineLoadingEl();
+    const label = el.querySelector('.qf-loading-label');
+    if (label) label.textContent = text;
+    el.style.display = 'flex';
+  }
+
+  private hideEngineLoading(): void {
+    if (this.engineLoadingEl) this.engineLoadingEl.style.display = 'none';
+  }
+
+  /** 对话开始时套用背景板，并预取本节点台词语音。 */
+  private applyDialogueBackdrop(tree?: DialogueTree): void {
+    this.dialogueUI.setBackdrop(this.sceneBgCache.get(this.currentSceneId) ?? null);
+    if (tree) this.prefetchTTSForTree(tree);
+  }
+
+  /** 生成缓存键：忽略 visited/talked/echo_choice 等易变旗标，保留剧情与阵营旗标。 */
+  private dialogueCacheKey(scene: string, trigger: string, stage: string): string {
+    const sig = Array.from(this.progressManager['flags'] as Set<string>)
+      .filter((f) => !/^(visited:|talked:|echo_choice:|scene_unlocked:|dialogue_unlocked:|stage_|asset_run_id:)/.test(f))
+      .sort()
+      .join(',');
+    // 任务进度变化（接任务/步骤推进/完成）才需要重新生成对白
+    const questSig = this.questManager.getActiveQuests()
+      .map((q) => `${q.definition.id}:${q.runtime.currentStepIndex}`)
+      .sort()
+      .join(',') + `|done:${this.questManager.completedQuests.length}`;
+    return `${scene}|${trigger}|${stage}|${sig}|q:${questSig}`;
+  }
+
+  /** 组装引擎对白请求（含 ECHO 世界状态）。 */
+  private buildEngineDialogueRequest(
+    localTree: DialogueTree,
+    trigger: string,
+    source: { kind: 'npc' | 'event'; entityId: string; questTargetId: string },
+  ): EngineDialogueRequest {
+    const npcName = this.dialogueUI.onGetNpcName?.(source.entityId) ?? source.entityId;
+    return {
+      sessionId: this.engineSessionId,
+      runId: this.runId,
+      dialogueId: localTree.id,
+      scene: this.currentSceneId,
+      trigger,
+      stage: this.progressManager.getStage(),
+      flags: Array.from(this.progressManager['flags'] as Set<string>),
+      quests: this.questManager.getActiveQuests().map((q) => ({
+        id: q.definition.id,
+        title: q.definition.title,
+        stepIndex: q.runtime.currentStepIndex,
+      })),
+      npcId: source.entityId,
+      npcName,
+      npcProfile: this.buildNpcProfile(source.entityId),
+      eventType: localTree.eventType,
+      cgUrl: localTree.cgUrl,
+      world: this.buildWorldContext(),
+    };
+  }
+
+  /** 取引擎对白：命中缓存直接返回；否则复用同一请求的 in-flight，避免重复生成。 */
+  private async getEngineDialogue(
+    key: string,
+    req: EngineDialogueRequest,
+    showWait: boolean,
+    waitText: string,
+  ): Promise<EngineDialogueResult | null> {
+    const cached = this.dialogueCache.get(key);
+    if (cached) return cached;
+    let inflight = this.dialogueInflight.get(key);
+    if (!inflight) {
+      inflight = generateEngineDialogue(req)
+        .then((res) => {
+          if (res) this.dialogueCache.set(key, res);
+          return res;
+        })
+        .catch(() => null)
+        .finally(() => {
+          this.dialogueInflight.delete(key);
+        });
+      this.dialogueInflight.set(key, inflight);
+    }
+    if (showWait) this.showEngineLoading(waitText);
+    try {
+      return await inflight;
+    } finally {
+      if (showWait) this.hideEngineLoading();
+    }
+  }
+
+  private async startEngineDialogue(
+    localTree: DialogueTree,
+    trigger: string,
+    source: { kind: 'npc' | 'event'; entityId: string; questTargetId: string },
+    force = false,
+  ): Promise<void> {
+    if (this.engineDialoguePending) return;
+    if (!force && this.dialogueSystem.isActive) return;
+    this.engineDialoguePending = true;
+
+    const npcName = this.dialogueUI.onGetNpcName?.(source.entityId) ?? source.entityId;
+    const key = this.dialogueCacheKey(this.currentSceneId, trigger, this.progressManager.getStage());
+    const req = this.buildEngineDialogueRequest(localTree, trigger, source);
+    const sceneId = this.currentSceneId;
+    const sceneName = this.currentScene.name;
+
+    let generated: EngineDialogueResult | null = null;
+    this.showEngineLoading(`正在准备场景与 ${npcName} 的对白…`);
+    try {
+      // 背景与对白并行生成；两者都就绪后再进入对话，避免"对白先出、背景没到位"
+      // 背景最多等 20s，超时则先进入对话，背景稍后到达仍会自动补上
+      const bgTimed = Promise.race<string | null>([
+        this.loadSceneBackground(sceneId, sceneName),
+        new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 20000)),
+      ]);
+      const [bgUrl, gen] = await Promise.all([
+        bgTimed,
+        this.getEngineDialogue(key, req, false, ''),
+      ]);
+      generated = gen;
+      if (bgUrl && this.currentSceneId === sceneId) {
+        this.dialogueUI.setBackdrop(bgUrl);
+      }
+    } finally {
+      this.hideEngineLoading();
+      this.engineDialoguePending = false;
+    }
+
+    // 生成期间玩家可能已开启其他对话或切换场景，放弃本次生成（脚本强制的后续 CG 除外）
+    if ((!force && this.dialogueSystem.isActive) || this.currentSceneId !== localTree.scene) return;
+
+    this.pendingSuggestion = generated?.suggestion ?? null;
+    this.activeDialogueSource = source;
+    this.finaleDialoguePending = generated?.finale ?? false;
+    if (generated?.finale) this.finaleCgUrl = localTree.cgUrl ?? '';
+    this.activeTreeFromEngine = !!(generated?.tree);
+    this.beginDialogueMinigame(generated?.minigame ?? localTree.minigame ?? null);
+    this.recordTranscript(generated?.tree ?? localTree);
+    this.applyDialogueBackdrop(generated?.tree ?? localTree);
+    this.dialogueSystem.start(generated?.tree ?? localTree);
+    if (!generated) {
+      this.notificationSystem.show('引擎不可用，已回退本地对白', 'danger', 2000);
+    }
+  }
+
+  /** 开始一段对白时登记其插入式小游戏（若无则清空）。 */
+  private beginDialogueMinigame(mg: EchoMinigameConfig | null | undefined): void {
+    this.pendingMiniGame = mg ?? null;
+    this.miniGamePlayed = false;
+    this.miniGameOpening = false;
+  }
+
+  /** 对白说完、进入选项前的闸门：条件满足才打开小游戏并暂停推进（通关后继续）。 */
+  private minigameGate(): boolean {
+    if (!this.pendingMiniGame) return true;
+    if (this.miniGamePlayed) return true;
+    if (!this.minigameConditionMet(this.pendingMiniGame)) {
+      this.pendingMiniGame = null;
+      return true;
+    }
+    // 到达插入时机？afterLine>=0 表示"第 afterLine 句之后"，否则整段说完后
+    const state = this.dialogueSystem.state;
+    const afterLine = typeof this.pendingMiniGame.afterLine === 'number' ? this.pendingMiniGame.afterLine : -1;
+    const reached = afterLine >= 0
+      ? (state.lineIndex >= afterLine && state.lineComplete)
+      : state.allLinesComplete;
+    if (!reached) return true;
+    if (!this.miniGameOpening) {
+      this.miniGameOpening = true;
+      this.openPendingMinigame();
+    }
+    return false;
+  }
+
+  /** 小游戏触发条件：委托完成/步骤/旗标/物品全部满足才触发。 */
+  private minigameConditionMet(mg: EchoMinigameConfig): boolean {
+    const cond = mg.condition;
+    if (!cond) return true;
+    if (cond.questCompleted && !this.questManager.completedQuests.includes(cond.questCompleted)) {
+      return false;
+    }
+    if (cond.questStepAtLeast) {
+      const { questId, step } = cond.questStepAtLeast;
+      const rt = this.questManager.getRuntime(questId);
+      const done = rt ? rt.status === 'completed' : false;
+      const idx = rt ? rt.currentStepIndex : -1;
+      if (!done && idx < step) return false;
+    }
+    if (cond.requireFlags) {
+      for (const f of cond.requireFlags) {
+        if (!this.progressManager.hasFlag(f)) return false;
+      }
+    }
+    if (cond.requireItems) {
+      for (const it of cond.requireItems) {
+        if (this.inventorySystem.getItemQty(it.itemId) < (it.count ?? 1)) return false;
+      }
+    }
+    return true;
+  }
+
+  private openPendingMinigame(): void {
+    const mg = this.pendingMiniGame;
+    if (!mg) return;
+    openEchoMinigame(mg, () => {
+      this.miniGameOpening = false;
+      this.miniGamePlayed = true;
+      // 只写小游戏自身旗标；任务完成/后续任务开启交回 ECHO 原生任务流程，绝不强制完成委托
+      const flag = mg.flag || `minigame_${mg.type}_done`;
+      this.progressManager.setFlag(flag);
+      this.notificationSystem.show(`${mg.title || '小游戏'} · 完成`, 'quest', 2200);
+    });
+  }
+
+  /** 引擎对白中，玩家做出选择后：请求角色针对该选择继续解释，并注入对话。 */
+  private async continueAfterChoice(choice: DialogueChoice): Promise<void> {
+    this.recentChoices.push({ text: choice.text, sceneId: this.currentSceneId });
+    if (this.recentChoices.length > 8) this.recentChoices = this.recentChoices.slice(-8);
+
+    const state = this.dialogueSystem.state;
+    const trigger = state.tree?.trigger ?? '';
+    const npcId = state.npcId || (trigger && trigger !== 'auto' ? trigger : '');
+    const npcName = this.dialogueUI.onGetNpcName?.(npcId) ?? npcId;
+
+    this.ttsToken++;
+    if (this.ttsAudio) { this.ttsAudio.pause(); this.ttsAudio = null; }
+    this.showEngineLoading('正在展开后续…');
+    let node: DialogueNode | null = null;
+    try {
+      node = await continueEngineDialogue({
+        sessionId: this.engineSessionId,
+        runId: this.runId,
+        scene: this.currentSceneId,
+        trigger,
+        stage: this.progressManager.getStage(),
+        playerChoice: choice.text,
+        npcId,
+        npcName,
+        npcProfile: this.buildNpcProfile(npcId),
+        history: this.recentTranscript
+          .filter((h) => h.sceneId === this.currentSceneId)
+          .slice(-6)
+          .map(({ speaker, text }) => ({ speaker, text })),
+        world: this.buildWorldContext(),
+      });
+    } finally {
+      this.hideEngineLoading();
+    }
+
+    if (!this.dialogueSystem.isActive) return;
+    if (node) {
+      if (choice.actions?.length) this.executeActions(choice.actions);
+      this.dialogueSystem.injectNode(node);
+    } else if (choice.next) {
+      // 有固定 outcome：退回原分支
+      this.dialogueSystem.choose(choice);
+    } else {
+      // 无固定后续且续写失败：给一句回应兜底，避免"选了就秒退"
+      if (choice.actions?.length) this.executeActions(choice.actions);
+      this.notificationSystem.show('后续生成失败，已用占位回应', 'danger', 2000);
+      this.dialogueSystem.injectNode({
+        id: `cont_fallback_${Date.now()}`,
+        lines: [{ speaker: npcId || 'narrator', text: '（对方沉默了片刻，似乎在斟酌措辞……）', emotion: 'idle' }],
+      });
+    }
+  }
+
+  /** 进场预生成：后台依次为本场景尚未对话的 NPC 预生成，点击时基本秒开。 */
+  private prefetchSceneDialogues(): void {
+    const sceneId = this.currentSceneId;
+    if (this.prefetchingScene === sceneId) return;
+    this.prefetchingScene = sceneId;
+    const stage = this.progressManager.getStage();
+    const npcs = this.currentScene.npcs
+      .filter((n) => n.dialogueTrigger && !this.talkedSet.has(n.entity.id))
+      .slice(0, 3);
+    void (async () => {
+      try {
+        for (const npc of npcs) {
+          if (this.currentSceneId !== sceneId || this.dialogueSystem.isActive) break;
+          const trigger = npc.dialogueTrigger;
+          const tree = this.dialogueRegistry.resolve(sceneId, trigger, {
+            currentStage: stage,
+            checkCondition: this.makeTreeConditionChecker(),
+          });
+          if (!tree || this.shouldPlayDialogueLocally(tree)) continue;
+          const key = this.dialogueCacheKey(sceneId, trigger, stage);
+          if (this.dialogueCache.has(key) || this.dialogueInflight.has(key)) continue;
+          const source = {
+            kind: 'npc' as const,
+            entityId: npc.entity.id,
+            questTargetId: this.editorNpcTargets.get(npc.entity.id) ?? npc.entity.id,
+          };
+          await this.getEngineDialogue(key, this.buildEngineDialogueRequest(tree, trigger, source), false, '');
+        }
+      } finally {
+        this.prefetchingScene = null;
+      }
+    })();
+  }
+
+  /** 汇总角色卡信息，供引擎为未注册节拍的 NPC 生成对白时使用。 */
+  private buildNpcProfile(entityId: string): string {
+    const character = CHARACTERS[entityId];
+    if (!character) {
+      const npc = this.currentScene?.npcs.find((candidate) => candidate.entity.id === entityId);
+      return npc ? `姓名：${npc.entity.name}；身份：本场景 NPC` : '';
+    }
+    return [
+      `姓名：${character.name}`,
+      `身份：${character.role}／${character.occupation}`,
+      `性格：${character.personality}`,
+      `动机：${character.motivation}`,
+      `语气：${character.voiceTone}`,
+    ].join('；');
+  }
+
+  /** 记录播放过的对白片段，供引擎续写时参考（避免与近期剧情矛盾）。 */
+  private recordTranscript(tree: DialogueTree): void {
+    const startNode = tree.nodes[tree.startNode];
+    if (!startNode) return;
+    const nameOf = (id: string): string => CHARACTERS[id]?.name ?? id;
+    for (const line of startNode.lines ?? []) {
+      const speaker = line.speaker === 'narrator' ? '旁白' : nameOf(line.speaker);
+      this.recentTranscript.push({ speaker, text: line.text, sceneId: tree.scene || this.currentSceneId });
+    }
+    if (this.recentTranscript.length > 16) {
+      this.recentTranscript = this.recentTranscript.slice(-16);
+    }
+  }
+
+  /** 从存档旗标读取背景轮次 ID（读档沿用；新档为空）。 */
+  private readRunIdFromFlags(): string {
+    const flags = this.progressManager['flags'] as Set<string>;
+    for (const f of flags) {
+      if (f.startsWith('asset_run_id:')) return f.slice('asset_run_id:'.length);
+    }
+    return '';
+  }
+
+  /** 汇总 ECHO 当前世界状态（场景/在场角色/任务步骤/旗标/物品/近期剧情），喂给引擎。 */
+  private buildWorldContext(): EngineWorldContext {
+    const scene = this.currentScene;
+    const stage = this.progressManager.getStage();
+    const npcs = scene.npcs.map((n) => ({
+      id: n.entity.id,
+      name: n.entity.name,
+      talkable: !!(n.dialogueTrigger && this.dialogueRegistry.resolve(scene.id, n.dialogueTrigger, {
+        currentStage: stage,
+        checkCondition: this.makeTreeConditionChecker(),
+      })),
+    }));
+    const items = scene.items
+      .filter((i) => !i.collected)
+      .map((i) => ({ id: i.entity.id, name: i.entity.name }));
+    const quests = this.questManager.getActiveQuests().map((q) => {
+      const step = q.definition.steps?.[q.runtime.currentStepIndex];
+      return {
+        id: q.definition.id,
+        title: q.definition.title,
+        stepDesc: step?.desc ?? '',
+        objectives: (step?.objectives ?? []).map((o) => ({
+          type: o.type,
+          target: o.target,
+          count: o.count ?? 1,
+        })),
+      };
+    });
+    const flags = Array.from(this.progressManager['flags'] as Set<string>)
+      .filter((f) => !/^(visited:|talked:|echo_choice:|scene_unlocked:|dialogue_unlocked:|stage_|asset_run_id:|mg_due:)/.test(f));
+    const inventory = Object.keys(ALL_ITEMS)
+      .map((id) => ({ id, name: ALL_ITEMS[id]?.name ?? id, qty: this.inventorySystem.getItemQty(id) }))
+      .filter((i) => i.qty > 0);
+    return {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      npcs,
+      items,
+      quests,
+      completedQuests: this.questManager.completedQuests.slice(),
+      flags,
+      inventory,
+      history: this.recentTranscript
+        .filter((h) => h.sceneId === this.currentSceneId)
+        .slice(-12)
+        .map(({ speaker, text }) => ({ speaker, text })),
+      choices: this.recentChoices
+        .filter((c) => c.sceneId === this.currentSceneId)
+        .slice(-8)
+        .map((c) => c.text),
+    };
+  }
+
+  /** 确保本场景背景已就绪（并发去重）；返回可用 objectURL，失败 null。 */
+  private loadSceneBackground(sceneId: string, sceneName: string): Promise<string | null> {
+    const cached = this.sceneBgCache.get(sceneId);
+    if (cached) {
+      if (this.currentSceneId === sceneId && this.dialogueSystem.isActive) {
+        this.dialogueUI.setBackdrop(cached);
+      }
+      return Promise.resolve(cached);
+    }
+    const existing = this.sceneBgPromise.get(sceneId);
+    if (existing) return existing;
+    const task = (async (): Promise<string | null> => {
+      try {
+        const remote = await generateEngineBackground({ scene: sceneId, atmosphere: sceneName, runId: this.runId });
+        if (!remote) return null;
+        const objectUrl = await fetchEngineObjectUrl(remote);
+        if (!objectUrl) return null;
+        const img = await loadBackgroundImage(objectUrl);
+        if (!img || img.naturalWidth === 0) {
+          // 生成图无法解码时丢弃，保持原背景
+          URL.revokeObjectURL(objectUrl);
+          return null;
+        }
+        if (!this.running) { URL.revokeObjectURL(objectUrl); return null; }
+        this.sceneBgCache.set(sceneId, objectUrl);
+        if (this.currentSceneId === sceneId && this.dialogueSystem.isActive) {
+          this.dialogueUI.setBackdrop(objectUrl);
+        }
+        return objectUrl;
+      } catch {
+        return null;
+      } finally {
+        this.sceneBgPromise.delete(sceneId);
+      }
+    })();
+    this.sceneBgPromise.set(sceneId, task);
+    return task;
+  }
+
+  /** 后台预取背景（不阻塞）。 */
+  private maybeLoadEngineBackground(sceneId: string, sceneName: string): void {
+    void this.loadSceneBackground(sceneId, sceneName);
+  }
+
+  /** 切换到新一行：立即停掉上一句语音，再为当前句请求并播放语音。 */
+  private speakLine(payload: { speakerId: string; speakerName: string; text: string }): void {
+    // 无论新句是否有配音，换行即取消上一句
+    this.ttsToken++;
+    if (this.ttsAudio) { this.ttsAudio.pause(); this.ttsAudio = null; }
+    if (!this.ttsEnabled) return;
+    const { speakerId, text } = payload;
+    if (!text || text.length < 2) return;
+    if (speakerId === 'narrator' || speakerId === '') return;
+    void this.playTTS(text, speakerId, this.ttsToken);
+  }
+
+  /** 解析一句台词的语音源：命中缓存直接返回，否则复用 in-flight，避免重复合成。 */
+  private resolveTTSSrc(text: string, speaker: string): Promise<string | null> {
+    const key = `${speaker}|${text}`;
+    const cached = this.ttsCache.get(key);
+    if (cached) return Promise.resolve(cached);
+    const existing = this.ttsInflight.get(key);
+    if (existing) return existing;
+    const task = (async (): Promise<string | null> => {
+      const result = await synthesizeEngineVoice({ text, speaker, scene: this.currentSceneId });
+      if (!result) return null;
+      if (!result.enabled) { this.ttsEnabled = false; return null; }
+      if (!result.url) return null;
+      const src = result.url.startsWith('data:') ? result.url : await fetchEngineObjectUrl(result.url);
+      if (src) this.ttsCache.set(key, src);
+      return src;
+    })().finally(() => { this.ttsInflight.delete(key); });
+    this.ttsInflight.set(key, task);
+    return task;
+  }
+
+  private async playTTS(text: string, speaker: string, token: number): Promise<void> {
+    const src = await this.resolveTTSSrc(text, speaker);
+    if (token !== this.ttsToken) return;     // 已切到下一句，丢弃本次结果
+    if (!src) return;
+    try {
+      const audio = new Audio(src);
+      this.ttsAudio = audio;
+      await audio.play();
+    } catch {
+      // 浏览器自动播放策略拦截时静默忽略
+    }
+  }
+
+  /** 对话开始时预取本节点前几条 NPC 台词语音，降低逐句延迟。 */
+  private prefetchTTSForTree(tree: DialogueTree): void {
+    if (!this.ttsEnabled) return;
+    const node = tree.nodes[tree.startNode];
+    if (!node) return;
+    const lines = (node.lines ?? [])
+      .filter((l) => l.speaker !== 'narrator' && l.text && l.text.length >= 2)
+      .slice(0, 4);
+    void (async () => {
+      for (const line of lines) {
+        if (!this.ttsEnabled) break;
+        await this.resolveTTSSrc(line.text, line.speaker);
+      }
+    })();
   }
 
   /** 渲染 */
@@ -1842,7 +2707,7 @@ export class GameEngine {
     ctx.clearRect(0, 0, this.renderer.canvas.width, this.renderer.canvas.height);
     this.renderer.clear('#0d1117');
 
-    // 渲染背景贴图（唯一的地板渲染方式）
+    // 渲染背景贴图（唯一的地板渲染方式）——探索时始终使用原始俯视地图
     const bgPath = this.currentScene.backgroundImage;
     const bgImg = bgPath ? getBackgroundImage(bgPath) : undefined;
     const worldSize = this.getMapSize();
@@ -2150,6 +3015,26 @@ export class GameEngine {
         ctx.arc(sx + tileSize / 2, sy + tileSize / 2, 3 + 2 * pulse, 0, Math.PI * 2);
         ctx.fill();
       }
+      // 透明目的地标签：让玩家提前知道这个亮点通向哪个场景
+      const targetName = ALL_SCENES[t.targetScene]?.name ?? t.targetScene;
+      const label = `→ ${targetName}`;
+      ctx.font = '4px "Noto Sans SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelW = ctx.measureText(label).width + 6;
+      const labelH = 8;
+      const labelX = sx + tileSize / 2 - labelW / 2;
+      const labelY = isUp ? sy + tileSize + 4 : sy - 14;
+      ctx.globalAlpha = 0.88;
+      ctx.fillStyle = 'rgba(2,10,18,0.72)';
+      ctx.fillRect(labelX, labelY, labelW, labelH);
+      ctx.strokeStyle = 'rgba(0,243,255,0.55)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(labelX, labelY, labelW, labelH);
+      ctx.globalAlpha = 0.96;
+      ctx.fillStyle = '#c9f8ff';
+      ctx.shadowBlur = 0;
+      ctx.fillText(label, sx + tileSize / 2, labelY + labelH / 2 + 0.5);
       ctx.restore();
     }
 

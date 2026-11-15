@@ -3,6 +3,105 @@
   "schemaVersion": 2,
   "quests": [
     {
+      "id": "quest_prologue_anonymous_commission",
+      "title": "开场：来自织女号的委托",
+      "desc": "林晓收到一封来自织女号空间站的匿名委托。先和她确认细节，再前往天文观测实验室追查那段记忆数据的来源。",
+      "category": "main",
+      "autoStart": true,
+      "stage": "prep",
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "与林晓对话，了解匿名委托。",
+          "objectives": [
+            {
+              "type": "talk_to_npc",
+              "target": "lin_xiao",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你了解了委托：一段来自织女号、损坏率 87% 的记忆数据。"
+        },
+        {
+          "id": "step_2",
+          "desc": "前往天文观测实验室，追查数据的来源。",
+          "objectives": [
+            {
+              "type": "reach_location",
+              "target": "astro",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你来到了天文观测实验室。"
+        }
+      ],
+      "rewards": {
+        "exp": 30,
+        "flags": [
+          "prologue_astro_arrived"
+        ]
+      },
+      "completionText": "开场任务完成：织女号的线索指向天文观测实验室。"
+    },
+    {
+      "id": "quest_solvay_guidance",
+      "title": "回溯索尔维",
+      "desc": "天文实验室东侧的 VR 回溯实验室里，记忆织机可以还原 1927 年索尔维会议的现场。前往那里，启动记忆织机。",
+      "category": "main",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "quest_completed",
+            "target": "quest_prologue_anonymous_commission"
+          },
+          {
+            "type": "visited_scene",
+            "target": "solvay",
+            "value": false
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "前往天文实验室东侧的 VR 回溯实验室，找到记忆织机。",
+          "objectives": [
+            {
+              "type": "reach_location",
+              "target": "vr",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你走进了 VR 回溯实验室。"
+        },
+        {
+          "id": "step_2",
+          "desc": "启动记忆织机，进入 1927 年索尔维会议。",
+          "objectives": [
+            {
+              "type": "reach_location",
+              "target": "solvay",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "记忆织机启动，你坠入 1927 年的索尔维会议。"
+        }
+      ],
+      "rewards": {
+        "exp": 20,
+        "flags": [
+          "solvay_guidance_done"
+        ]
+      },
+      "completionText": "你抵达了 1927 年的索尔维会议。"
+    },
+    {
       "id": "quest_visit_gravitational_wave_detector",
       "title": "参观引力波探测器",
       "desc": "前往天体物理实验室，参观引力波探测器，了解其工作原理。",
@@ -198,15 +297,11 @@
     {
       "id": "quest_point_to_pattern",
       "title": "从一个落点到一张图",
-      "desc": "单看每一个光点都是粒子的坠落，可落点多了，图样竟显出波的条纹。把这张电子衍射累积图拿给德布罗意看看。",
+      "desc": "洛伦兹的委托完成了。会场右侧还留着一张电子衍射累积图——单看每一个光点都是粒子的坠落，落点多了，图样竟显出波的条纹。把它找出来，拿给德布罗意看看。",
       "category": "main",
       "autoStart": true,
       "startCondition": {
         "conditions": [
-          {
-            "type": "has_item",
-            "target": "item_diffraction"
-          },
           {
             "type": "quest_completed",
             "target": "quest_lorentz_commission"
@@ -217,6 +312,19 @@
       "steps": [
         {
           "id": "step_1",
+          "desc": "在会场右侧找到电子衍射累积图",
+          "objectives": [
+            {
+              "type": "collect_item",
+              "target": "item_diffraction",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你拿到了电子衍射累积图：单个落点是粒子，落点累积起来却显出波的条纹。"
+        },
+        {
+          "id": "step_2",
           "desc": "带着衍射图样，与德布罗意交谈",
           "objectives": [
             {
@@ -350,6 +458,344 @@
         ]
       },
       "completionText": "光子箱被引力的钟差击穿，而争论仍无定论。黑板上留下两台从未真正制造出的装置——会议之外，物理学的世纪将继续。"
+    },
+    {
+      "id": "quest_camp_copenhagen",
+      "title": "哥本哈根的同行者",
+      "desc": "你在索尔维会议上选择了玻尔与海森堡的阵营。去与玻尔交谈，听听他对你立场的看法。",
+      "category": "side",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "has_flag",
+            "target": "camp_copenhagen"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "与玻尔交谈",
+          "objectives": [
+            {
+              "type": "talk_to_npc",
+              "target": "solvay_bohr",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "玻尔认可了你的立场。"
+        }
+      ],
+      "rewards": {
+        "exp": 30,
+        "flags": [
+          "camp_copenhagen_bond"
+        ]
+      },
+      "completionText": "玻尔：「欢迎加入这场关于世界的辩论。」"
+    },
+    {
+      "id": "quest_camp_realism",
+      "title": "实在论的同盟",
+      "desc": "你在索尔维会议上选择了爱因斯坦与薛定谔的阵营。去找爱因斯坦，听听他的下一步。",
+      "category": "side",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "has_flag",
+            "target": "camp_realism"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "与爱因斯坦交谈",
+          "objectives": [
+            {
+              "type": "talk_to_npc",
+              "target": "solvay_einstein",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "爱因斯坦把你当成了自己人。"
+        }
+      ],
+      "rewards": {
+        "exp": 30,
+        "flags": [
+          "camp_realism_bond"
+        ]
+      },
+      "completionText": "爱因斯坦：「很好。有些问题，值得用一辈子去怀疑。」"
+    },
+    {
+      "id": "quest_camp_de_broglie",
+      "title": "看不见的导航波",
+      "desc": "你没有加入任何一派，而是坐到了德布罗意身边。去与他再谈谈那条被忽视的第三条道路。",
+      "category": "hidden",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "has_flag",
+            "target": "camp_de_broglie"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "与德布罗意交谈",
+          "objectives": [
+            {
+              "type": "talk_to_npc",
+              "target": "solvay_de_broglie",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "德布罗意把你视为罕见的同道。"
+        }
+      ],
+      "rewards": {
+        "exp": 40,
+        "flags": [
+          "camp_de_broglie_bond"
+        ]
+      },
+      "completionText": "德布罗意：「也许我们错了，也许只是太早了。」"
+    },
+    {
+      "id": "quest_lisa_calibration",
+      "title": "LISA 光谱校准",
+      "desc": "侧面研究员需要一张留在 LISA 观测台控制台上的光谱校准底片。去观测台取回它，交给研究员。",
+      "category": "side",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "talked_to_npc",
+            "target": "astro_scientist_side"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "在 LISA 观测台取得光谱校准底片",
+          "objectives": [
+            {
+              "type": "collect_item",
+              "target": "item_spectrum",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你拿到了 LISA 的光谱校准底片。"
+        },
+        {
+          "id": "step_2",
+          "desc": "将校准底片交给侧面研究员",
+          "objectives": [
+            {
+              "type": "submit_item",
+              "target": "item_spectrum",
+              "count": 1,
+              "submitTo": "astro_scientist_side"
+            }
+          ],
+          "logic": "AND"
+        }
+      ],
+      "rewards": {
+        "exp": 40,
+        "flags": [
+          "lisa_calibration_done"
+        ]
+      },
+      "completionText": "研究员把底片放进校准槽：「条纹对上了，谢谢你。」"
+    },
+    {
+      "id": "quest_isolation_sample",
+      "title": "隔离区取样",
+      "desc": "隔离区人员请你从 ARPES 实验室取回一份密封生物样本，不要打开它。",
+      "category": "side",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "talked_to_npc",
+            "target": "astro_hazmat"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "在 ARPES 实验室取得密封生物样本",
+          "objectives": [
+            {
+              "type": "collect_item",
+              "target": "item_bio",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "你拿到了密封生物样本。"
+        },
+        {
+          "id": "step_2",
+          "desc": "把样本交给隔离区人员",
+          "objectives": [
+            {
+              "type": "submit_item",
+              "target": "item_bio",
+              "count": 1,
+              "submitTo": "astro_hazmat"
+            }
+          ],
+          "logic": "AND"
+        }
+      ],
+      "rewards": {
+        "exp": 40,
+        "flags": [
+          "isolation_sample_done"
+        ]
+      },
+      "completionText": "隔离区人员接过容器，迅速锁进隔离柜。"
+    },
+    {
+      "id": "quest_repair_preparation",
+      "title": "修复前准备",
+      "desc": "林晓提到修复需要记忆数据和神经接口。把办公室里的这两样东西收好。",
+      "category": "side",
+      "autoStart": true,
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "talked_to_npc",
+            "target": "lin_xiao"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "收集记忆数据和神经接口",
+          "objectives": [
+            {
+              "type": "collect_item",
+              "target": "memory_data",
+              "count": 1
+            },
+            {
+              "type": "collect_item",
+              "target": "neural_interface",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "修复前的两样东西都准备好了。"
+        }
+      ],
+      "rewards": {
+        "exp": 20,
+        "flags": [
+          "repair_preparation_done"
+        ]
+      },
+      "completionText": "你将记忆数据和神经接口放进工作台：「可以开始了。」"
+    },
+    {
+      "id": "quest_memory_repair",
+      "title": "被剪掉的记忆",
+      "desc": "记忆碎片和神经接口都齐了。林晓说，工作台能把被剪掉的那段记忆拼回来——但修复后的载波还要去天文实验室做时间校准，最后在 VR 回溯实验室完成完整重建。",
+      "category": "main",
+      "autoStart": true,
+      "stage": "prep",
+      "startCondition": {
+        "conditions": [
+          {
+            "type": "has_item",
+            "target": "memory_data"
+          },
+          {
+            "type": "has_item",
+            "target": "neural_interface"
+          }
+        ],
+        "logic": "AND"
+      },
+      "steps": [
+        {
+          "id": "step_1",
+          "desc": "和林晓确认记忆修复方案。",
+          "objectives": [
+            {
+              "type": "talk_to_npc",
+              "target": "lin_xiao",
+              "count": 1
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "林晓把工作台预热好了。"
+        },
+        {
+          "id": "step_2",
+          "desc": "在办公室工作台接入记忆碎片与神经接口。",
+          "objectives": [
+            {
+              "type": "custom_flag",
+              "target": "memory_repair_done"
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "修复后的记忆载波已写入便携终端。"
+        },
+        {
+          "id": "step_3",
+          "desc": "去天文实验室，用 LISA 干涉记录校准记忆时间戳。",
+          "objectives": [
+            {
+              "type": "custom_flag",
+              "target": "memory_check_done"
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "时间戳对齐：正是织女号退役那天。"
+        },
+        {
+          "id": "step_4",
+          "desc": "在 VR 回溯实验室完成完整记忆重建。",
+          "objectives": [
+            {
+              "type": "custom_flag",
+              "target": "memory_fully_repaired"
+            }
+          ],
+          "logic": "AND",
+          "onCompleteText": "完整的记忆被重新拼合。"
+        }
+      ],
+      "rewards": {
+        "exp": 60,
+        "flags": [
+          "memory_repair_complete"
+        ]
+      },
+      "completionText": "你终于看清了被剪掉的那段记忆：织女号，十二个人，以及你自己。"
     }
   ],
   "placements": [],
@@ -516,5 +962,5 @@
       "stage": "debate1"
     }
   },
-  "updatedAt": 1788152269382
+  "updatedAt": 1794453814167
 }

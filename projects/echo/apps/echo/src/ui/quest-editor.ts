@@ -1789,7 +1789,8 @@ function normalizeStartCondition(raw: unknown): QuestStartCondition | undefined 
       const type = (typeof e.type === 'string' && validTypes.includes(e.type as StartConditionType))
         ? e.type as StartConditionType : 'quest_completed';
       const target = typeof e.target === 'string' ? e.target.trim() : '';
-      return target ? { type, target } : null;
+      const value = typeof e.value === 'boolean' ? e.value : undefined;
+      return target ? { type, target, ...(value === undefined ? {} : { value }) } : null;
     })
     .filter((entry): entry is StartConditionEntry => entry !== null);
 

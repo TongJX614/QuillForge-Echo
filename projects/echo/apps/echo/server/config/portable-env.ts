@@ -129,7 +129,7 @@ export function readPortableEnvFile(path: string): PortableEnv {
 export function applyAtomicConnectionOverride(
   fileValues: PortableEnv,
   processEnv: NodeJS.ProcessEnv,
-  prefix: 'SHARED_LLM' | 'ECHO_LLM' | 'QUILLFORGE_LLM',
+  prefix: 'SHARED_LLM' | 'ECHO_LLM',
 ): PortableEnv {
   const keys = [
     `${prefix}_PROVIDER`,

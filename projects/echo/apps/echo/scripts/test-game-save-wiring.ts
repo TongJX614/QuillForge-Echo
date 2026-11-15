@@ -38,7 +38,7 @@ const minigame = readFileSync(
   'utf8',
 );
 assert.match(minigame, /get isOpen\(/u);
-assert.match(minigame, /isQuillForgeMessage/u);
+assert.match(minigame, /isEngineMessage/u);
 assert.match(minigame, /EMBED_MESSAGE\.pauseRequest/u);
 
 const intro = readFileSync(

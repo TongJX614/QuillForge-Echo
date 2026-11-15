@@ -2,6 +2,7 @@ import type { InventorySlot } from './inventory';
 import type {
   GlobalProgressState,
   ObjectiveProgress,
+  Quest,
   QuestManagerState,
   QuestRuntime,
   QuestStatus,
@@ -41,6 +42,8 @@ export interface GameSnapshot {
   inventory: InventorySlot[];
   progress: GlobalProgressState;
   quests: QuestManagerState;
+  /** 本存档专属的动态支线任务定义（不写入全局 editor-project） */
+  dynamicQuests?: Quest[];
   world: {
     talkedEntityIds: string[];
     collectedEntityIds: string[];

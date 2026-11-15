@@ -11,6 +11,15 @@ import { getCG, loadCG } from '../assets/cg-images';
 
 const PLAYER_IDS = new Set(['su_ran']);
 
+const SPEAKER_NAMES: Record<string, string> = {
+  su_ran: '苏然', lin_xiao: '林晓', du_weiming: '杜维明', astro_scientist: '研究员', researcher: 'VR研究员', narrator: '旁白',
+  astro_scientist_back: '研究员', astro_scientist_crouch: '研究员', astro_scientist_side: '天体物理研究员',
+  astro_scientist_back_side: '研究员', astro_scientist_crouch_side: '研究员', astro_hazmat: '隔离区人员',
+  solvay_einstein: '爱因斯坦', solvay_bohr: '玻尔', solvay_curie: '玛丽·居里',
+  solvay_heisenberg: '海森堡', solvay_schrodinger: '薛定谔', solvay_pauli: '泡利',
+  solvay_born: '玻恩', solvay_lorentz: '洛伦兹', solvay_de_broglie: '德布罗意', solvay_debroglie: '德布罗意',
+};
+
 /** 对话历史条目 */
 export interface DialogueLogEntry {
   speakerId: string;
@@ -53,6 +62,9 @@ export class DialogueUI {
   private portraitRightEl: HTMLDivElement;
   /** CG 全屏图片 (event_type2) */
   private cgEl: HTMLImageElement;
+  /** 场景背景板（引擎生成，仅对话时展示，event_type2 时不显示） */
+  private backdropEl: HTMLImageElement;
+  private backdropUrl: string | null = null;
 
   // ---- 控制按钮 ----
   private controlsEl: HTMLDivElement;
@@ -80,6 +92,13 @@ export class DialogueUI {
   private lastShakeEmotion: string = ''; // 防止连续两次shake
   private onAdvance: (() => void) | null = null;
   private onChoice: ((idx: number) => void) | null = null;
+  /** 整行文本显示完成时回调（用于语音合成） */
+  onLineComplete: ((payload: { speakerId: string; speakerName: string; text: string; emotion?: string }) => void) | null = null;
+  /** 切换到新一行时回调（用于立即停掉上一句语音并预取新语音） */
+  onLineStart: ((payload: { speakerId: string; speakerName: string; text: string; emotion?: string }) => void) | null = null;
+  /** 对白说完、准备进入选项/推进前的闸门；返回 false 表示暂时挂起（如插入式小游戏进行中） */
+  onLinesComplete: (() => boolean) | null = null;
+  private lastStartedLine = '';
   private visible: boolean = false;
   private paused: boolean = false;
 
@@ -128,6 +147,13 @@ export class DialogueUI {
         this.showLog();
       }
     }, { passive: false });
+
+    // --- 场景背景板（引擎生成，仅对话时展示）---
+    this.backdropEl = document.createElement('img');
+    this.backdropEl.style.cssText =
+      'position:absolute;inset:0;width:100%;height:100%;' +
+      'object-fit:cover;pointer-events:none;z-index:0;display:none;';
+    this.overlay.appendChild(this.backdropEl);
 
     // --- 左侧立绘 (NPC) ---
     this.portraitLeftEl = document.createElement('div');
@@ -417,12 +443,7 @@ export class DialogueUI {
     const content = this.logPanel.querySelector('#history-content') as HTMLDivElement;
     if (!content) return;
     content.innerHTML = '';
-    const nameMap: Record<string, string> = {
-      su_ran: '苏然', lin_xiao: '林晓', du_weiming: '杜维明', astro_scientist: '研究员', researcher: 'VR研究员', narrator: '系统通知',
-      solvay_einstein: '爱因斯坦', solvay_bohr: '玻尔', solvay_curie: '玛丽·居里',
-      solvay_heisenberg: '海森堡', solvay_schrodinger: '薛定谔', solvay_pauli: '泡利',
-      solvay_born: '玻恩', solvay_lorentz: '洛伦兹', solvay_debroglie: '德布罗意',
-    };
+    const nameMap = SPEAKER_NAMES;
     for (const entry of this.logEntries) {
       const row = document.createElement('div');
       row.style.cssText = 'margin-bottom:10px;';
@@ -494,28 +515,61 @@ export class DialogueUI {
     }
   }
 
+  /** 设置对话背景板（引擎生成的场景背景）。传 null 清除。 */
+  setBackdrop(url: string | null): void {
+    this.backdropUrl = url;
+    if (!url) {
+      this.backdropEl.removeAttribute('src');
+      this.backdropEl.style.display = 'none';
+      return;
+    }
+    if (this.backdropEl.getAttribute('src') !== url) this.backdropEl.src = url;
+  }
+
   update(): void {
     const state = this.dialogue.state;
     if (!state.active) {
+      this.lastStartedLine = '';
       this.hide();
       return;
     }
     this.show();
+    // 背景板仅在非 CG（event_type1）对白时展示
+    this.backdropEl.style.display = this.backdropUrl && state.eventType !== 'event_type2' ? 'block' : 'none';
+
+    // --- 行开始：停掉上一句语音并预取新语音 ---
+    const startKey = state.currentNode ? `${state.currentNode.id}|${state.lineIndex}` : '';
+    if (startKey && startKey !== this.lastStartedLine && state.displayText) {
+      this.lastStartedLine = startKey;
+      const startNameMap: Record<string, string> = {
+        su_ran: '苏然', lin_xiao: '林晓', du_weiming: '杜维明', astro_scientist: '研究员', researcher: 'VR研究员', narrator: '旁白',
+      };
+      this.onLineStart?.({
+        speakerId: state.speakerId,
+        speakerName: startNameMap[state.speakerId] || state.speakerName,
+        text: state.displayText,
+        emotion: state.currentEmotion,
+      });
+    }
 
     // --- 记录对话历史（行完成时记录，防重复）---
     if (state.lineComplete || state.allLinesComplete) {
       const lineKey = `${state.speakerId}|${state.displayText}|${state.lineIndex}`;
       if (lineKey !== this.lastLoggedLine && state.displayText) {
         this.lastLoggedLine = lineKey;
-        const nameMap: Record<string, string> = {
-          su_ran: '苏然', lin_xiao: '林晓', du_weiming: '杜维明', astro_scientist: '研究员', researcher: 'VR研究员', narrator: '系统通知',
-        };
+        const nameMap = SPEAKER_NAMES;
         this.logEntries.push({
           speakerId: state.speakerId,
           speakerName: nameMap[state.speakerId] || state.speakerName,
           text: state.displayText,
           emotion: state.currentEmotion,
           eventType: state.eventType,
+        });
+        this.onLineComplete?.({
+          speakerId: state.speakerId,
+          speakerName: nameMap[state.speakerId] || state.speakerName,
+          text: state.displayText,
+          emotion: state.currentEmotion,
         });
       }
     }
@@ -558,22 +612,17 @@ export class DialogueUI {
 
     // --- 说话者名称 ---
     const charId = state.speakerId;
-    const nameMap: Record<string, string> = {
-      su_ran: '苏然', lin_xiao: '林晓', du_weiming: '杜维明', astro_scientist: '研究员', researcher: 'VR研究员', narrator: '系统通知',
-      solvay_einstein: '爱因斯坦', solvay_bohr: '玻尔', solvay_curie: '玛丽·居里',
-      solvay_heisenberg: '海森堡', solvay_schrodinger: '薛定谔', solvay_pauli: '泡利',
-      solvay_born: '玻恩', solvay_lorentz: '洛伦兹', solvay_debroglie: '德布罗意',
-    };
+    const nameMap = SPEAKER_NAMES;
     const isNarration = !charId || charId === '' || charId === 'narrator';
-    const speakerText = isNarration ? '系统通知' : (nameMap[charId] || charId);
+    const speakerText = isNarration ? '旁白' : (nameMap[charId] || charId);
 
     if (speakerText !== this.lastSpeakerText) {
       this.lastSpeakerText = speakerText;
       this.speakerBox.textContent = speakerText;
       if (isNarration) {
-        this.speakerBox.style.color = '#fff';
-        this.speakerBox.style.backgroundColor = '#ff0055';
-        this.speakerBox.style.boxShadow = '0 0 10px #ff0055';
+        this.speakerBox.style.color = '#9fb3c8';
+        this.speakerBox.style.backgroundColor = 'rgba(120,140,160,0.18)';
+        this.speakerBox.style.boxShadow = 'none';
       } else if (PLAYER_IDS.has(charId)) {
         this.speakerBox.style.color = '#003344';
         this.speakerBox.style.backgroundColor = '#00f3ff';
@@ -621,6 +670,13 @@ export class DialogueUI {
 
     // --- DLG 立绘 ---
     this.updatePortrait(state);
+
+    // --- 闸门（插入式小游戏）：到达插入时机时挂起，不显示选项/继续 ---
+    if (this.onLinesComplete && !this.onLinesComplete()) {
+      this.choicesEl.style.display = 'none';
+      this.continueEl.style.display = 'none';
+      return;
+    }
 
     // --- 选项按钮 ---
     if (state.allLinesComplete && state.choices && state.choices.length > 0) {
@@ -879,25 +935,30 @@ export class DialogueUI {
     const npcId = state.npcId;
     const isNarration = !speakerId || speakerId === '' || speakerId === 'narrator';
 
-    // 检查 NPC 是否有立绘
-    const npcHasPortrait = !isNarration && !!npcId && !PLAYER_IDS.has(npcId) && getDlgPortrait(npcId, emotion) !== null;
+    // 左侧立绘跟随"当前说话人"：说话人是可显示角色就用他，否则回退到场景 NPC
+    const speakerPortrait = (!isNarration && !PLAYER_IDS.has(speakerId) && getDlgPortrait(speakerId, emotion) !== null)
+      ? speakerId : '';
+    const leftCharId = speakerPortrait || npcId || '';
+    const npcHasPortrait = !isNarration && !!leftCharId && !PLAYER_IDS.has(leftCharId) && getDlgPortrait(leftCharId, emotion) !== null;
 
-    // NPC立绘（左侧）— 仅当 NPC 有立绘时才处理
-    if (npcHasPortrait && npcId) {
-      const npcImg = getDlgPortrait(npcId, emotion);
+    // NPC立绘（左侧）— 仅当有立绘时才处理
+    if (npcHasPortrait && leftCharId) {
+      const npcImg = getDlgPortrait(leftCharId, emotion);
       if (npcImg && npcImg !== this.leftImgEl) {
         this.portraitLeftEl.innerHTML = '';
-        npcImg.style.height = '82.5%';
+        const isSprite = npcImg.dataset.sprite === '1';
+        npcImg.style.height = isSprite ? '60%' : '82.5%';
         npcImg.style.objectFit = 'contain';
+        npcImg.style.imageRendering = isSprite ? 'pixelated' : '';
         npcImg.style.filter = 'drop-shadow(0 0 15px #00f3ff) drop-shadow(0 0 30px rgba(0,243,255,0.3))';
-        npcImg.style.opacity = speakerId === npcId ? '1' : '0.5';
+        npcImg.style.opacity = speakerId === leftCharId ? '1' : '0.5';
         this.portraitLeftEl.appendChild(npcImg);
         this.leftImgEl = npcImg;
       } else if (npcImg && npcImg === this.leftImgEl) {
-        npcImg.style.opacity = speakerId === npcId ? '1' : '0.5';
+        npcImg.style.opacity = speakerId === leftCharId ? '1' : '0.5';
       }
     } else {
-      // NPC 无立绘：清空左侧
+      // 无立绘：清空左侧
       if (this.leftImgEl) {
         this.portraitLeftEl.innerHTML = '';
         this.leftImgEl = null;

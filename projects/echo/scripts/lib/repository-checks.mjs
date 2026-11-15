@@ -2,7 +2,8 @@ import { access, readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 
 const SKIP = new Set(['.git', '.venv', 'node_modules', '__pycache__', '.pytest_cache']);
-const SKIP_PATHS = new Set(['apps/quillforge/var']);
+// .run holds runtime logs written by the outer orchestrator when it launches this game
+const SKIP_PATHS = new Set(['.run']);
 const FORBIDDEN = new Set(['.codegraph', '.qoder', '.coze', '.playwright-cli', 'superpowers']);
 const TEXT_EXTENSIONS = new Set([
   '.cjs',

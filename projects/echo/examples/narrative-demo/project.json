@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "id": "demo-observation",
+    "title": "观测者协议",
+    "version": "0.1.0",
+    "description": "一次关于观测、记忆与干预的短篇分支。用于验证叙事内核的场景、条件、后果与结局。",
+    "author": "Narrative Core Demo",
+    "license": "CC BY-NC-SA 4.0",
+    "genre": "科幻 / 悬疑",
+    "presentation": "vn"
+  },
+  "worldbook": [
+    {
+      "id": "observation-protocol",
+      "title": "观测协议",
+      "content": "任何未登记的观测事件必须在九十秒内决定：校准、记录或撤离。校准会改变被观测对象，记录会留下观测痕迹，撤离则放弃解释权。",
+      "tags": ["规则", "核心"]
+    },
+    {
+      "id": "decoherence-zone",
+      "title": "退相干区",
+      "content": "环日站外环在恒星风峰值期间会进入退相干区。进入该区域的观测记录可能同时包含多个版本，且无法判断哪一个版本先发生。",
+      "tags": ["环境", "现象"]
+    },
+    {
+      "id": "calibration-cost",
+      "title": "校准代价",
+      "content": "校准不是免费的。校准员必须用一段自身记忆作为参照系，被使用的记忆会在校准完成后变得不可靠。",
+      "tags": ["科技", "代价"]
+    }
+  ],
+  "characters": [
+    {
+      "id": "lin_che",
+      "name": "林澈",
+      "role": "观测员",
+      "description": "驻站观测员，习惯先记录再判断。",
+      "personality": "冷静、克制，对未经验证的解释保持怀疑。",
+      "speakingStyle": "短句，先给结论再补理由。"
+    },
+    {
+      "id": "qi_yu",
+      "name": "祁禹",
+      "role": "校准员",
+      "description": "负责校准观测链的工程师，对记忆代价有直接经验。",
+      "personality": "务实、敏感，愿意承担干预的后果。",
+      "speakingStyle": "语气平稳，偶尔用工程比喻。"
+    },
+    {
+      "id": "station",
+      "name": "环日站",
+      "role": "系统",
+      "description": "环日观测站的自动系统，只陈述事实与时限。",
+      "personality": "无情绪，严格遵循协议。",
+      "speakingStyle": "编号式陈述，避免形容词。"
+    }
+  ],
+  "story": {
+    "startScene": "signal",
+    "stageOrder": ["arrival", "descent", "core"],
+    "initialStage": "arrival",
+    "initialFlags": ["station_online"],
+    "scenes": [
+      {
+        "id": "signal",
+        "name": "信号",
+        "presentation": "vn",
+        "location": "环日观测站 · 外环",
+        "time": "03:17",
+        "description": "外环在凌晨三点十七分失去信号。不是中断，而是某种有规律的重复。",
+        "dialogue": [
+          {
+            "speaker": "narrator",
+            "text": "外环的灯依次熄灭，只剩观测窗上缓慢移动的星芒。系统把一段无法归类的信号推到了主屏幕。"
+          },
+          {
+            "speaker": "station",
+            "text": "检测到未登记观测事件。按《观测协议》，需在九十秒内决定：校准、记录或撤离。"
+          },
+          {
+            "speaker": "lin_che",
+            "text": "这不是噪声。它在重复我们的呼叫。"
+          },
+          {
+            "speaker": "qi_yu",
+            "text": "也可能是我们自己上一次的残影。校准会把我们现在的记忆也卷进去。"
+          }
+        ],
+        "choices": [
+          {
+            "id": "calibrate",
+            "text": "立即校准",
+            "description": "用祁禹的记忆作为参照系，把信号拉回可解释的范围。",
+            "effects": [
+              { "type": "set_flag", "flag": "calibrated" },
+              { "type": "add_stat", "stat": "curiosity", "value": 1 },
+              { "type": "set_stage", "stage": "descent" }
+            ],
+            "nextScene": "corridor"
+          },
+          {
+            "id": "record",
+            "text": "先完整记录",
+            "description": "不改变信号，先让它留下可复查的痕迹。",
+            "effects": [
+              { "type": "set_flag", "flag": "recorded" },
+              { "type": "add_stat", "stat": "caution", "value": 2 },
+              { "type": "set_stage", "stage": "descent" }
+            ],
+            "nextScene": "corridor"
+          },
+          {
+            "id": "evacuate",
+            "text": "撤离外环",
+            "description": "放弃解释权，把观测站留在它自己的时间里。",
+            "effects": [
+              { "type": "set_flag", "flag": "evacuated" },
+              { "type": "add_stat", "stat": "self_preservation", "value": 2 }
+            ],
+            "ending": "ending_witness"
+          }
+        ]
+      },
+      {
+        "id": "corridor",
+        "name": "回廊",
+        "presentation": "vn",
+        "location": "环日观测站 · 内环回廊",
+        "time": "03:24",
+        "description": "回廊的灯一盏盏亮起，又在你身后熄灭。记录里多了一段不存在的声音。",
+        "onEnter": [
+          { "type": "set_flag", "flag": "corridor_reached" },
+          { "type": "add_stat", "stat": "tension", "value": 1 }
+        ],
+        "dialogue": [
+          {
+            "speaker": "narrator",
+            "text": "你们向核心舱走。每经过一扇门，身后的灯就熄灭一盏，像有人在替你们删掉来路。"
+          },
+          {
+            "speaker": "qi_yu",
+            "text": "记录里多了一段声音。是你，也不是你。"
+          },
+          {
+            "speaker": "lin_che",
+            "text": "如果我们继续走，观测就会变成互相观测。"
+          },
+          {
+            "speaker": "qi_yu",
+            "text": "那就得决定：是修好它，还是让它保持未被解释的样子。"
+          }
+        ],
+        "choices": [
+          {
+            "id": "intervene",
+            "text": "干预观测链",
+            "description": "进入核心，主动改写正在发生的观测。",
+            "conditions": [
+              {
+                "type": "any",
+                "conditions": [
+                  { "type": "flag", "flag": "calibrated" },
+                  { "type": "flag", "flag": "recorded" }
+                ]
+              }
+            ],
+            "effects": [
+              { "type": "set_flag", "flag": "intervened" },
+              { "type": "add_stat", "stat": "courage", "value": 2 },
+              { "type": "add_relationship", "characterId": "qi_yu", "value": -1 }
+            ],
+            "nextScene": "core"
+          },
+          {
+            "id": "observe",
+            "text": "只观察，不干预",
+            "description": "继续记录，让核心自己暴露规则。",
+            "effects": [
+              { "type": "set_flag", "flag": "observed" },
+              { "type": "add_relationship", "characterId": "qi_yu", "value": 1 }
+            ],
+            "nextScene": "core"
+          },
+          {
+            "id": "turn_back",
+            "text": "原路返回",
+            "description": "你保留了足够的记录，决定不再深入。",
+            "conditions": [
+              { "type": "stat_at_least", "stat": "caution", "value": 1 }
+            ],
+            "effects": [
+              { "type": "set_flag", "flag": "retreated" }
+            ],
+            "ending": "ending_witness"
+          }
+        ]
+      },
+      {
+        "id": "core",
+        "name": "校准核心",
+        "presentation": "vn",
+        "location": "环日观测站 · 核心舱",
+        "time": "03:31",
+        "description": "核心舱中央悬浮着一枚没有影子的光源。它正在用你们的记忆校准自己。",
+        "onEnter": [
+          { "type": "set_stage", "stage": "core" },
+          { "type": "set_flag", "flag": "core_reached" }
+        ],
+        "dialogue": [
+          {
+            "speaker": "narrator",
+            "text": "核心舱没有影子。光源悬浮在中央，像一枚被暂停的恒星。"
+          },
+          {
+            "speaker": "station",
+            "text": "校准完成度 97%。请选择保留哪一种现实。"
+          },
+          {
+            "speaker": "lin_che",
+            "text": "不管选哪个，我们都会少掉一部分自己。"
+          },
+          {
+            "speaker": "qi_yu",
+            "text": "那就选一个，至少知道少掉的是哪一部分。"
+          }
+        ],
+        "choices": [
+          {
+            "id": "preserve",
+            "text": "保留观测记录",
+            "description": "让记录成为唯一被承认的现实，哪怕它不再完整。",
+            "effects": [
+              { "type": "set_flag", "flag": "preserved" },
+              { "type": "add_stat", "stat": "truth", "value": 2 }
+            ],
+            "ending": "ending_observer"
+          },
+          {
+            "id": "destroy",
+            "text": "摧毁校准器",
+            "description": "终止校准，让信号回到无法解释的状态。",
+            "conditions": [
+              {
+                "type": "any",
+                "conditions": [
+                  { "type": "flag", "flag": "intervened" },
+                  { "type": "stat_at_least", "stat": "courage", "value": 1 }
+                ]
+              }
+            ],
+            "effects": [
+              { "type": "set_flag", "flag": "destroyed" },
+              { "type": "add_stat", "stat": "resolve", "value": 2 }
+            ],
+            "ending": "ending_erase"
+          },
+          {
+            "id": "merge",
+            "text": "进入光源",
+            "description": "不保留任何单一版本，让自己成为观测的一部分。",
+            "conditions": [
+              {
+                "type": "all",
+                "conditions": [
+                  { "type": "flag", "flag": "observed" },
+                  { "type": "relationship_at_least", "characterId": "qi_yu", "value": 1 }
+                ]
+              }
+            ],
+            "effects": [
+              { "type": "set_flag", "flag": "merged" },
+              { "type": "add_relationship", "characterId": "qi_yu", "value": 2 }
+            ],
+            "ending": "ending_witness"
+          },
+          {
+            "id": "defer",
+            "text": "让系统决定",
+            "description": "放弃选择，让已有状态决定你最终看见哪一种现实。",
+            "effects": [
+              { "type": "set_flag", "flag": "deferred" }
+            ]
+          }
+        ]
+      }
+    ],
+    "endings": [
+      {
+        "id": "ending_observer",
+        "title": "观测者",
+        "text": "你保留了记录。信号被写进档案，代价是你们再也无法确认哪一段记忆属于自己。环日站恢复运行，像什么都没有发生。",
+        "priority": 30,
+        "conditions": [
+          { "type": "flag", "flag": "preserved" }
+        ]
+      },
+      {
+        "id": "ending_erase",
+        "title": "擦除",
+        "text": "校准器熄灭了。信号退回无法解释的黑暗里，观测站保住了，但你们都知道：有些问题被留下，并不等于被解决。",
+        "priority": 30,
+        "conditions": [
+          { "type": "flag", "flag": "destroyed" }
+        ]
+      },
+      {
+        "id": "ending_witness",
+        "title": "旁证",
+        "text": "你没有替任何人决定哪一种现实该被保留。你只是把看见的东西带了出来，作为旁证，交给下一个愿意观测的人。",
+        "priority": 20,
+        "conditions": [
+          {
+            "type": "any",
+            "conditions": [
+              { "type": "flag", "flag": "retreated" },
+              { "type": "flag", "flag": "evacuated" },
+              { "type": "flag", "flag": "observed" },
+              { "type": "flag", "flag": "merged" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ending_silence",
+        "title": "静默",
+        "text": "系统替你完成了选择。第二天，环日站照常发回数据，只有你们的观测记录空了一页。",
+        "priority": 0
+      }
+    ]
+  },
+  "gameplay": {
+    "sceneBindings": {
+      "signal": {
+        "background": "station-outer-ring",
+        "metadata": { "mood": "cold", "timeOfDay": "night" }
+      },
+      "corridor": {
+        "background": "station-inner-corridor",
+        "metadata": { "mood": "tense" }
+      },
+      "core": {
+        "background": "station-calibration-core",
+        "metadata": { "mood": "surreal" }
+      }
+    }
+  },
+  "assets": []
+}

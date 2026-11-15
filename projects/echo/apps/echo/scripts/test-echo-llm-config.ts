@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -107,49 +108,19 @@ expectConfigError(
   'partial-secret',
 );
 
-const sharedMigration = buildMigratedRootEnv(
-  parsePortableEnv('DEEPSEEK_API_KEY=same-secret'),
-  parsePortableEnv(
-    [
-      'DEEPSEEK_API_KEY=same-secret',
-      'DEEPSEEK_BASE_URL=https://api.deepseek.com/v1',
-      'DEEPSEEK_MODEL=legacy-runtime',
-      'IMAGE_SIZE_BG=1344x768',
-      'IMAGE_CONCURRENCY=3',
-      'SESSION_TTL_SECONDS=456',
-    ].join('\n'),
-  ),
-);
-assert.equal(sharedMigration.sameConnection, true);
-assert.equal(sharedMigration.echoSource, 'shared');
-assert.equal(sharedMigration.quillforgeSource, 'shared');
-assert.match(sharedMigration.text, /^SHARED_LLM_PROVIDER=/mu);
-assert.doesNotMatch(sharedMigration.text, /^ECHO_LLM_API_KEY=/mu);
-assert.match(sharedMigration.text, /^IMAGE_SIZE_BG=1344x768$/mu);
-assert.match(sharedMigration.text, /^IMAGE_CONCURRENCY=3$/mu);
-assert.match(sharedMigration.text, /^SESSION_TTL_SECONDS=456$/mu);
-
-const dedicatedMigration = buildMigratedRootEnv(
+const migration = buildMigratedRootEnv(
   parsePortableEnv('DEEPSEEK_API_KEY=echo-secret'),
-  parsePortableEnv(
-    [
-      'DEEPSEEK_API_KEY=quillforge-secret',
-      'DEEPSEEK_BASE_URL=https://api.deepseek.com',
-      'DEEPSEEK_MODEL=legacy-runtime',
-    ].join('\n'),
-  ),
 );
-assert.equal(dedicatedMigration.sameConnection, false);
-assert.equal(dedicatedMigration.echoSource, 'dedicated');
-assert.equal(dedicatedMigration.quillforgeSource, 'dedicated');
-assert.match(dedicatedMigration.text, /^ECHO_LLM_API_KEY=echo-secret$/mu);
-assert.match(
-  dedicatedMigration.text,
-  /^QUILLFORGE_LLM_API_KEY=quillforge-secret$/mu,
-);
-assert.match(
-  dedicatedMigration.text,
-  /^QUILLFORGE_RUNTIME_MODEL=deepseek-v4-flash$/mu,
+assert.equal(migration.echoSource, 'dedicated');
+assert.match(migration.text, /^ECHO_LLM_PROVIDER=openai-compatible$/mu);
+assert.match(migration.text, /^ECHO_LLM_API_KEY=echo-secret$/mu);
+assert.match(migration.text, /^ECHO_LLM_SOURCE=dedicated$/mu);
+assert.match(migration.text, /^ECHO_CHAT_MODEL=deepseek-chat$/mu);
+assert.doesNotMatch(migration.text, /^NARRATIVE_ENGINE_/mu);
+assert.doesNotMatch(migration.text, /^SHARED_LLM_/mu);
+expectConfigError(
+  () => buildMigratedRootEnv(parsePortableEnv('OTHER_KEY=value')),
+  'LEGACY_ENV_VALUE_MISSING',
 );
 
 const sandbox = mkdtempSync(join(tmpdir(), 'gewuzaojing-env-'));
@@ -173,7 +144,7 @@ try {
   const legacyRoot = join(sandbox, 'legacy');
   const legacyStart = join(legacyRoot, 'src', 'echo', 'file.ts');
   mkdirSync(dirname(legacyStart), { recursive: true });
-  mkdirSync(join(legacyRoot, 'src', 'Quillforge'), { recursive: true });
+  mkdirSync(join(legacyRoot, 'src', 'LegacyApp'), { recursive: true });
   writeFileSync(legacyStart, '');
   expectConfigError(
     () => resolveGewuzaojingEnvPath({ processEnv: {}, startPath: legacyStart }),
@@ -202,15 +173,15 @@ try {
     resolveGewuzaojingEnvPath: typeof resolveGewuzaojingEnvPath;
   };
   assert.equal(
-    bundledConfig.resolveGewuzaojingEnvPath({ processEnv: {} }),
-    resolve(rootEnv),
+    realpathSync(bundledConfig.resolveGewuzaojingEnvPath({ processEnv: {} })),
+    realpathSync(rootEnv),
   );
   assert.equal(
-    resolveGewuzaojingEnvPath({
+    realpathSync(resolveGewuzaojingEnvPath({
       processEnv: { GEWUZAOJING_ENV_FILE: rootEnv },
       startPath: echoStart,
-    }),
-    resolve(rootEnv),
+    })),
+    realpathSync(rootEnv),
   );
   expectConfigError(
     () =>

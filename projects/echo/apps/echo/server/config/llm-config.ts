@@ -106,7 +106,6 @@ export function loadEchoLlmConfig(
   let values = readPortableEnvFile(envFile);
   values = applyAtomicConnectionOverride(values, processEnv, 'SHARED_LLM');
   values = applyAtomicConnectionOverride(values, processEnv, 'ECHO_LLM');
-  values = applyAtomicConnectionOverride(values, processEnv, 'QUILLFORGE_LLM');
 
   const source = scalarValue(values, processEnv, 'ECHO_LLM_SOURCE');
   if (source !== 'shared' && source !== 'dedicated') {

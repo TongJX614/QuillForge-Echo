@@ -4,8 +4,6 @@
  * Quest 奖励、Dialogue 效果、Step 完成效果全部使用 Action[]。
  */
 
-import type { ProjectTwoSelection } from '../types/vr-experience';
-
 // ─── Condition ──────────────────────────────────────────
 
 export type Condition =
@@ -36,6 +34,14 @@ export function isLogicExpr(expr: ConditionExpression): expr is
 export type NarrativeAction =
   | { type: 'quest.activate'; questId: string }
   | { type: 'quest.complete'; questId: string }
+  | {
+      type: 'quest.dispatch';
+      title?: string;
+      desc?: string;
+      targetNpc: string;
+      targetName?: string;
+      exp?: number;
+    }
   | { type: 'flag.set'; flag: string }
   | { type: 'flag.unset'; flag: string }
   | { type: 'inventory.add'; itemId: string; count?: number }
@@ -47,11 +53,23 @@ export type NarrativeAction =
   | { type: 'worldline.set'; value: string }
   | { type: 'exp.add'; amount: number }
   | { type: 'event.emit'; eventId: string }
-  | { type: 'minigame.open'; minigameId: string }
+  | {
+      type: 'minigame.open';
+      minigameId: string;
+      config?: {
+        title?: string;
+        instructions?: string;
+        items?: (string | { title: string; snippet?: string })[];
+        clues?: string[];
+        distractors?: (string | { title: string; snippet?: string })[];
+        flag?: string;
+        /** 通关后要完成的委托任务 id（完成当前委托，推进剧情） */
+        questId?: string;
+      };
+    }
   | {
       type: 'launch_vr_experience';
-      experienceId: 'quillforge-webui';
-      projectTwo: ProjectTwoSelection;
+      experienceId: 'narrative-engine-webui';
     };
 
 // ─── 运行时条件评估（单一事实来源）──────────────────────
@@ -128,6 +146,7 @@ export const START_CONDITION_SCHEMA = {
 export const ACTION_SCHEMA = {
   'quest.activate': { params: ['questId'], required: ['questId'], ref: 'quest' },
   'quest.complete': { params: ['questId'], required: ['questId'], ref: 'quest' },
+  'quest.dispatch': { params: ['targetNpc', 'title', 'desc', 'exp'], required: ['targetNpc'], ref: 'npc' },
   'flag.set': { params: ['flag'], required: ['flag'], ref: 'flag' },
   'flag.unset': { params: ['flag'], required: ['flag'], ref: 'flag' },
   'inventory.add': { params: ['itemId', 'count'], required: ['itemId'], ref: 'item' },
@@ -140,8 +159,8 @@ export const ACTION_SCHEMA = {
   'exp.add': { params: ['amount'], required: ['amount'], ref: null },
   'event.emit': { params: ['eventId'], required: ['eventId'], ref: null },
   launch_vr_experience: {
-    params: ['experienceId', 'projectTwo'],
-    required: ['experienceId', 'projectTwo'],
+    params: ['experienceId'],
+    required: ['experienceId'],
     ref: null,
   },
 } as const;

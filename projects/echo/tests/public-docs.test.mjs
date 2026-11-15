@@ -9,10 +9,9 @@ test('README documents the two experiences, root commands and license split', ()
   }
 });
 
-test('CI has repository, echo, quillforge and integration jobs without secrets', () => {
+test('CI has repository and echo jobs without secrets', () => {
   const ci = readFileSync('.github/workflows/ci.yml', 'utf8');
-  for (const job of ['repository:', 'echo:', 'quillforge:', 'integration:']) assert.match(ci, new RegExp(`^  ${job}`, 'mu'));
+  for (const job of ['repository:', 'echo:']) assert.match(ci, new RegExp(`^  ${job}`, 'mu'));
   assert.doesNotMatch(ci, /secrets\./u);
   assert.match(ci, /node-version:\s*24/u);
-  assert.match(ci, /python-version:\s*['"]3\.11['"]/u);
 });

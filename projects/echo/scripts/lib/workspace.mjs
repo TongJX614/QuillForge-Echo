@@ -17,12 +17,6 @@ export function resolveEnvFile(root, environment = process.env) {
   return resolve(override ?? join(root, '.env'));
 }
 
-export function pythonExecutable(root) {
-  return process.platform === 'win32'
-    ? join(root, '.venv', 'Scripts', 'python.exe')
-    : join(root, '.venv', 'bin', 'python');
-}
-
 export function pnpmInvocation(args = []) {
   if (process.platform !== 'win32') return { command: 'pnpm', args };
   const corepack = join(dirname(process.execPath), 'node_modules', 'corepack', 'dist', 'corepack.js');
@@ -30,15 +24,13 @@ export function pnpmInvocation(args = []) {
   return { command: process.execPath, args: [corepack, 'pnpm', ...args] };
 }
 
-export function buildServiceSpecs(root, envFile, python = pythonExecutable(root)) {
+export function buildServiceSpecs(root, envFile) {
   const sharedEnv = { ...process.env, GEWUZAOJING_ENV_FILE: envFile };
   const echoCommand = pnpmInvocation(['--dir', join(root, 'apps/echo'), 'dev']);
+  // This repository only covers ECHO itself. The narrative engine is an external
+  // service started by the outer orchestrator, which injects its address through
+  // NARRATIVE_ENGINE_HOST/PORT; when absent, the in-game generative entries degrade.
   return [
-    {
-      name: 'quillforge', command: python, args: [join(root, 'apps/quillforge/server_start.py')],
-      cwd: join(root, 'apps/quillforge'), host: '127.0.0.1', port: 8050,
-      readyUrl: 'http://127.0.0.1:8050/', env: sharedEnv,
-    },
     {
       name: 'echo', command: echoCommand.command, args: echoCommand.args, cwd: root,
       host: '127.0.0.1', port: 5000, readyUrl: 'http://127.0.0.1:5000/', env: sharedEnv,
@@ -46,8 +38,7 @@ export function buildServiceSpecs(root, envFile, python = pythonExecutable(root)
   ];
 }
 
-export function assertToolVersions({ node = process.versions.node, pnpm, python }) {
+export function assertToolVersions({ node = process.versions.node, pnpm }) {
   if (Number(node.split('.')[0]) !== 24) throw new Error(`NODE_VERSION:${node}`);
   if (Number(pnpm.split('.')[0]) < 9) throw new Error(`PNPM_VERSION:${pnpm}`);
-  if (!/^3\.11(?:\.|$)/u.test(python)) throw new Error(`PYTHON_VERSION:${python}`);
 }

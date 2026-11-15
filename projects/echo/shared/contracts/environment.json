@@ -12,14 +12,12 @@
     "duplicateKeys": "error"
   },
   "connectionSources": ["shared", "dedicated"],
-  "connectionGroups": ["SHARED_LLM", "ECHO_LLM", "QUILLFORGE_LLM"],
+  "connectionGroups": ["SHARED_LLM", "ECHO_LLM"],
   "requiredEchoScalars": [
     "ECHO_LLM_SOURCE", "ECHO_CHAT_MODEL", "ECHO_QUEST_MODEL", "ECHO_HOST", "ECHO_PORT"
   ],
-  "requiredQuillForgeScalars": [
-    "QUILLFORGE_LLM_SOURCE", "QUILLFORGE_RUNTIME_MODEL", "QUILLFORGE_SCRIPT_MODEL",
-    "QUILLFORGE_DEBATE_MODEL", "QUILLFORGE_MINIGAME_MODEL", "QUILLFORGE_HOST",
-    "QUILLFORGE_PORT", "QUILLFORGE_ECHO_ENTRY_ENABLED"
+  "optionalNarrativeEngineScalars": [
+    "NARRATIVE_ENGINE_HOST", "NARRATIVE_ENGINE_PORT"
   ],
   "errorCodes": [
     "AGGREGATION_ROOT_NOT_FOUND", "ENV_PATH_NOT_ABSOLUTE", "ENV_FILE_MISSING",

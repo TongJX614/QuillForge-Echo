@@ -12,12 +12,12 @@
 
 | 模块 | 定位 | 技术栈 | 核心输出 |
 | --- | --- | --- | --- |
-| **QuillForge**（创作端） | 面向创作者的生成式世界编织引擎 | Python + FastAPI | 世界书、剧情续写、小游戏配置 |
-| **Echo / 回响**（运行端） | 面向玩家的像素 RPG 宿主与智能体运行时 | TypeScript + Express + Vite | 任务发布、NPC 对话、状态回写 |
+| **Echo / 回响**（运行端，本仓库） | 面向玩家的像素 RPG 宿主与智能体运行时 | TypeScript + Express + Vite | 任务发布、NPC 对话、状态回写 |
+| **叙事引擎**（创作端，外部服务） | 面向创作者的生成式世界编织引擎 | 由接入方提供 | 世界书、剧情续写、小游戏配置 |
 
 ### 双模块体系
 
-* **QuillForge · 世界创作** — 根据主题、资料与世界规则生成**世界书**（事实与来源、人物与关系、目标与冲突、生成禁区），再基于世界书上下文续写下一幕，并为关键节点编排小游戏。产出是可预览、可编辑、可导入的叙事内容包。
+* **叙事引擎 · 世界创作** — 根据主题、资料与世界规则生成**世界书**（事实与来源、人物与关系、目标与冲突、生成禁区），再基于世界书上下文续写下一幕，并为关键节点编排小游戏。产出是可预览、可编辑、可导入的叙事内容包。引擎不在本仓库内，Echo 只通过约定好的 HTTP 与 iframe 消息接口消费它。
 
 * **Echo · 智能体运行** — 读取场景、人物、道具、交互事件、Flags、任务历史和角色设定，分别生成合法的任务 JSON 与角色化 NPC 回应，再由运行端校验结构、推进任务并回写状态。**AI 只生成候选，运行端只执行受控状态动作。**
 
@@ -30,7 +30,7 @@
 1. **天文（ASTRO）** — 追问 LISA，接到书籍支线，了解引力波探测的背景、原理与工程。
 2. **材料物理（ARPES）** — 进入角分辨光电子能谱实验室，调查设备与样品杆异常，理解能带测量。
 3. **VR 实验室** — 取得门禁卡后启动 VR，进入独立研究员的世界编织入口。
-4. **索尔维 1927（标杆 DLC）** — 手工制作、高事实约束的剧情内容，不依赖大模型即可完整体验。
+4. **索尔维 1927（标杆 DLC）** — 以 1927 年索尔维会议为舞台、手工制作、高事实约束的剧情内容，不依赖大模型即可完整体验。
 
 其中索尔维路线把理论拆解成可以击破的推理链（共轭准备 → 相位漂移 → 条纹洗平），玩家在**言弹辩驳**中不是选择术语，而是击中具体的推理环节；错误言弹会明确说明为何没有击中。
 
@@ -42,22 +42,22 @@
 
 * **证据化科普** — 同一个对象（如电子衍射累积图）同时承担任务证据、科普说明与论战言弹三重角色。
 
-* **跨应用契约** — Echo 不导入任何 QuillForge 模块，仅通过 iframe 打开其本地地址，并消费 `shared/contracts` 定义的消息词汇表；两个应用读取同一个根 `.env`（`shared/contracts/environment.json` 为唯一跨应用环境接口）。
+* **跨应用契约** — Echo 不导入任何引擎模块，仅通过 iframe 打开其本地地址，并消费 `shared/contracts` 定义的消息词汇表；引擎地址由 `NARRATIVE_ENGINE_HOST/PORT` 给出，可留空（`shared/contracts/environment.json` 为唯一跨应用环境接口）。
 
 游戏内含两条体验入口：
 
 1. **索尔维 1927 路线**：手工制作、高事实约束的剧情内容，不依赖大模型即可体验。
-2. **世界编织**：在 VR 实验室中与独立研究员交互，通过游戏内 iframe 进入 QuillForge，选择主题与角色、生成世界书、人工审阅确认后开启 GALGAME。
+2. **世界编织**：在 VR 实验室中与独立研究员交互，通过游戏内 iframe 接入叙事引擎，选择主题与角色、生成世界书、人工审阅确认后开启 GALGAME。未接入引擎时该入口会明确提示不可用。
 
-体验流程：`Echo VR 研究员 → iframe → QuillForge 世界书审阅 → GALGAME`。
+体验流程：`Echo VR 研究员 → iframe → 叙事引擎世界书审阅 → GALGAME`。
 
 ## 架构概览
 
-* Echo 不导入任何 QuillForge Python 模块，仅通过 iframe 打开本地 QuillForge 地址，并消费 `shared/contracts` 中定义的消息词汇表。
+* Echo 不导入任何引擎模块，仅通过 iframe 打开配置好的引擎地址，并消费 `shared/contracts` 中定义的消息词汇表。
 
-* QuillForge 不读取 Echo 游戏状态；其浏览器适配器负责宣布就绪、在 Escape 时请求 Echo 暂停菜单，并接收暂停/恢复通知。
+* 引擎不读取 Echo 游戏状态；其浏览器适配器负责宣布就绪、在 Escape 时请求 Echo 暂停菜单，并接收暂停/恢复通知。任务、Flags 与存档的事实源始终是 Echo。
 
-* 两个应用的环境适配器读取同一个根目录 `.env` 文件（`shared/contracts/environment.json` 定义唯一跨应用环境接口）。
+* Echo 在没有引擎时依然可运行：生成式入口降级为不可用，手工制作的内容不受影响。
 
 详细内容见 [docs/architecture/overview.md](docs/architecture/overview.md)。
 
@@ -67,7 +67,6 @@
 | ------- | ---------------- |
 | Node.js | 24.x（`>=24 <25`） |
 | pnpm    | >= 9             |
-| Python  | 3.11             |
 
 ## 快速开始（Windows PowerShell）
 
@@ -75,7 +74,7 @@
 # 1. 克隆仓库后进入根目录
 cd gewuzaojing-echo
 
-# 2. 一键安装：校验工具版本、创建 .venv、安装 pnpm 与 Python 依赖
+# 2. 一键安装：校验工具版本并安装 pnpm 依赖
 pnpm setup
 
 # 3. 复制环境变量模板并填入你的 API Key
@@ -90,71 +89,42 @@ pnpm dev
 
 * **Echo 主游戏**：<http://127.0.0.1:5000/>
 
-* **QuillForge 独立页面**：<http://127.0.0.1:8050/>
-
 `pnpm dev` 在启动前会校验唯一的根 `.env` 文件；若端口被占用，会报告冲突的 PID 与命令行，但不会强行终止未知进程。
 
 ## 配置 API（根目录 `.env`）
 
-所有 LLM、图像与语音配置都写在仓库根目录的 `.env`（模板见 `.env.example`）。
+Echo 的 LLM 配置写在仓库根目录的 `.env`（模板见 `.env.example`）。
 
 > 提示：不配置 API Key 也可以启动并游玩手工制作的索尔维 1927 路线；生成式功能（游戏内对话、任务生成、世界编织等）需要配置真实密钥后才可用。
 
-### 方式一：共享同一个 LLM 连接（推荐）
-
-将两个选择器都设为 `shared`，Echo 与 QuillForge 复用同一组连接配置：
+### 方式一：共用一组 LLM 连接（推荐）
 
 ```env
 SHARED_LLM_PROVIDER=openai-compatible
 SHARED_LLM_API_KEY=sk-你的真实密钥
 SHARED_LLM_BASE_URL=https://api.deepseek.com/v1
 ECHO_LLM_SOURCE=shared
-QUILLFORGE_LLM_SOURCE=shared
 ```
 
 `SHARED_LLM_PROVIDER` 目前为 `openai-compatible`，任何兼容 OpenAI Chat Completions 接口的服务均可使用（DeepSeek、Moonshot、硅基流动、本地 vLLM/Ollama 等），只需替换 `BASE_URL` 与密钥。
 
-### 方式二：为两个应用分别配置独立连接
+### 方式二：为 Echo 单独配置连接
 
-将两个选择器都改为 `dedicated`，并取消注释对应的三行：
+把选择器改为 `dedicated`，并给出完整的三元组：
 
 ```env
 ECHO_LLM_SOURCE=dedicated
-QUILLFORGE_LLM_SOURCE=dedicated
 
 ECHO_LLM_PROVIDER=openai-compatible
 ECHO_LLM_API_KEY=echo-应用的密钥
 ECHO_LLM_BASE_URL=https://echo-provider.example/v1
-
-QUILLFORGE_LLM_PROVIDER=openai-compatible
-QUILLFORGE_LLM_API_KEY=quillforge-应用的密钥
-QUILLFORGE_LLM_BASE_URL=https://quillforge-provider.example/v1
 ```
 
 ### 任务模型
 
-按任务为各模块指定模型名（须与所选服务商的模型 ID 一致）：
-
 ```env
-ECHO_CHAT_MODEL=deepseek-v4-flash       # Echo 游戏内对话
-ECHO_QUEST_MODEL=deepseek-v4-flash      # Echo 任务生成
-QUILLFORGE_RUNTIME_MODEL=...         # QuillForge 运行时
-QUILLFORGE_SCRIPT_MODEL=...          # 剧本生成
-QUILLFORGE_DEBATE_MODEL=...          # 辩论/审议
-QUILLFORGE_MINIGAME_MODEL=...        # 迷你游戏生成
-```
-
-### 可选：图像与语音（TTS）
-
-QuillForge 的图像生成与语音合成同样读取根 `.env`：
-
-```env
-IMAGE_API_KEY=replace-with-image-secret
-IMAGE_BASE_URL=https://image-provider.example/v1
-IMAGE_MODEL=image-model
-TTS_API_KEY=replace-with-tts-secret
-TTS_BASE_URL=https://tts-provider.example/v1
-TTS_MODEL=tts-model
+ECHO_CHAT_MODEL=deepseek-v4-flash       # 游戏内对话
+ECHO_QUEST_MODEL=deepseek-v4-flash      # 任务生成
 ```
 
 ### 本地服务端口
@@ -162,11 +132,19 @@ TTS_MODEL=tts-model
 ```env
 ECHO_HOST=127.0.0.1
 ECHO_PORT=5000
-QUILLFORGE_HOST=127.0.0.1
-QUILLFORGE_PORT=8050
-QUILLFORGE_ECHO_ENTRY_ENABLED=true
-QUILLFORGE_OPEN_BROWSER=false   # 设为 true 则启动时自动弹出 QuillForge 页面
 ```
+
+### 可选：接入外部叙事引擎
+
+世界编织需要一个在别处运行的叙事引擎。融合部署时由上层编排注入下面两项；
+单独开发 Echo 时可以留空，此时世界编织入口提示未接入，其余内容照常可玩。
+
+```env
+NARRATIVE_ENGINE_HOST=127.0.0.1
+NARRATIVE_ENGINE_PORT=8050
+```
+
+引擎自己的模型、密钥、图像与语音配置属于引擎仓库，不在本仓库的 `.env` 里。
 
 ## 开始游玩（Echo 主页面）
 
@@ -175,10 +153,10 @@ QUILLFORGE_OPEN_BROWSER=false   # 设为 true 则启动时自动弹出 QuillForg
 
    * **体验现有世界** — 进入手工制作的索尔维 1927 路线。
 
-   * **世界编织** — 进入世界编织：依次完成主题与角色选择，游戏内打开 QuillForge，生成世界书并供你审阅；确认后才会开始 GALGAME。
+   * **世界编织** — 进入世界编织：依次完成主题与角色选择，游戏内打开叙事引擎，生成世界书并供你审阅；确认后才会开始 GALGAME。
 
    * **暂时离开**。
-3. 按 Escape 呼出 Echo 系统菜单；存档、读档、继续游戏、返回标题与退出均为宿主游戏功能，QuillForge 内的 Escape 会转交给 Echo 暂停菜单处理。
+3. 按 Escape 呼出 Echo 系统菜单；存档、读档、继续游戏、返回标题与退出均为宿主游戏功能，引擎页面内的 Escape 会转交给 Echo 暂停菜单处理。
 
 ## 验证与测试
 
@@ -194,8 +172,7 @@ pnpm test:repository   # 仅运行仓库结构与内容清单检查
 ```
 gewuzaojing-echo/
 ├── apps/
-│   ├── echo/          # 像素 RPG 宿主（TypeScript + Express + Vite）
-│   └── quillforge/    # 生成式世界编织引擎（Python + FastAPI）
+│   └── echo/          # 像素 RPG 宿主（TypeScript + Express + Vite）
 ├── docs/              # 架构 / 开发 / 产品文档
 ├── scripts/           # setup / dev / test 等工作区脚本
 ├── shared/contracts/  # 跨应用环境与 iframe 消息契约

@@ -14,6 +14,7 @@ const officeNpcs = [
 const officeItems = [
   new InteractiveItem('memory_data', 5, 3, 'item_doc', '记忆数据', 'memory_data', 'doc', false, 'memory_data'),
   new InteractiveItem('neural_interface', 7, 3, 'item_glow', '神经接口', 'neural_interface', 'glow', false, 'neural_interface'),
+  new InteractiveItem('memory_repair_console', 10, 5, 'item_glow', '记忆修复工作台', 'memory_repair_console', 'glow', true),
 ];
 
 export const SCENE_OFFICE: SceneDef = createSceneDef(
@@ -73,6 +74,8 @@ const astroNpcs = [
 const astroItems: InteractiveItem[] = [
   // LISA 观测台 CG 事件（第二类事件）
   new InteractiveItem('lisa_cg_event', 22, 14, 'event_orb', 'LISA 观测台', 'lisa_cg_event', 'glow', true),
+  // LISA 光谱校准底片（侧研究员支线「LISA 校准」）
+  new InteractiveItem('lisa_spectrum_record', 21, 14, 'item_doc', 'LISA 光谱校准底片', 'lisa_spectrum_record', 'doc', false, 'item_spectrum'),
 ];
 
 export const SCENE_ASTRO: SceneDef = createSceneDef(
@@ -105,6 +108,7 @@ export const SCENE_VR: SceneDef = createSceneDef(
   vrNpcs,
   [
     new InteractiveItem('vr_device', 16, 8, 'event_orb', 'VR沉浸装置', 'vr_device_event', 'glow', true),
+    new InteractiveItem('memory_repair_vr', 10, 12, 'event_orb', '记忆重建终端', 'memory_repair_vr', 'glow', true),
   ],
   [
     { x: 10, y: 19, targetScene: 'astro', targetX: 10, targetY: 1 },
