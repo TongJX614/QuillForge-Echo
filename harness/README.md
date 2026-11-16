@@ -18,8 +18,11 @@ harness/
         ├── minigame_generator.py 12 种玩法的生成与判定
         ├── debate_generator.py  言弹辩论生成
         ├── routes/              /api/echo/*、/api/debate/*、/api/minigame/*
-        ├── static/              debate.html、minigame.html、嵌入桥接、入口逻辑
-        └── config/              echo_beats.yaml（节拍注册表）、echo.yaml（玩法参数）
+        ├── static/              debate.html、minigame.html、嵌入桥接、入口逻辑、
+        │                        首页世界编织视图、/game 页小游戏浮层
+        ├── config/              echo_beats.yaml（节拍注册表）、echo.yaml（玩法参数）
+        ├── tests/               生成器与路由的 pytest（86 项）
+        └── tests_js/            嵌入桥接、入口状态机、契约一致性的 node 测试（18 项）
 ```
 
 ## 挂载了什么

@@ -56,6 +56,25 @@ function pickPython() {
   return 'python3';
 }
 
+// ECHO 由引擎异步拉起，冷启动需要十几秒；出现终态（ready/failed/disabled）即返回
+async function waitForEchoStatus(url, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = { enabled: false, state: 'unknown' };
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (response.ok) {
+        last = await response.json();
+        if (['ready', 'failed', 'disabled'].includes(last.state)) return last;
+      }
+    } catch {
+      // 引擎还没起来，继续等
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return last;
+}
+
 // ── 1. 静态契约检查 ──────────────────────────────────────
 
 console.log('\n[1/3] 静态契约');
@@ -226,9 +245,11 @@ if (!existsSync(join(root, '.venv'))) {
     passed += 1;
     console.log(`  ok   节拍注册表解析成功（${Object.keys(beats.packs).length} 包 / ${beats.beats.length} 节拍）`);
 
-    const status = await (await fetch(`http://127.0.0.1:${FUSION_PORT}/api/echo/status`)).json();
+    // ECHO 由引擎在启动事件里异步拉起，tsx + vite 冷启动需要十几秒，
+    // 这里轮询等待而不是查一次就判定
+    const status = await waitForEchoStatus(`http://127.0.0.1:${FUSION_PORT}/api/echo/status`);
     if (status.enabled && status.state === 'ready') {
-      const runtime = await (await fetch(`http://127.0.0.1:${ECHO_PORT}/echo-runtime-config.js`)).text();
+      const runtime = await (await fetch(`http://127.0.0.1:${status.port}/echo-runtime-config.js`)).text();
       assert.match(runtime, /__ECHO_RUNTIME__/u);
       assert.ok(runtime.includes(String(FUSION_PORT)), '注入的引擎端口不正确');
       passed += 1;

@@ -71,13 +71,27 @@ sh scripts/fusion.sh     # 融合：引擎驱动 ECHO          引擎 8050 / ECH
 ## 验证
 
 ```
-node scripts/integration-smoke.mjs                     # 跨模块冒烟
-cd engine && python -m pytest quillforge/tests -q -m "not live"
-cd projects/echo && node --test tests/*.test.mjs
+sh scripts/test-all.sh    # 一键跑全部
 ```
 
-冒烟脚本覆盖静态契约、引擎独立模式与融合模式三段，依赖缺失时明确报 SKIP
-而不是假装通过。
+分段：
+
+| 套件 | 命令 | 数量 |
+| --- | --- | --- |
+| 引擎 | `cd engine && python -m pytest quillforge/tests -q -m "not live"` | 350 |
+| 接入层 | `python -m pytest harness/projects/echo/tests -q` | 86 |
+| 接入层 JS | `node --test harness/projects/echo/tests_js/*.cjs` | 18 |
+| ECHO 仓库级 | `cd projects/echo && node --test tests/*.test.mjs` | 9 |
+| ECHO app 级 | `cd projects/echo/apps/echo`，逐个 `node --import tsx scripts/test-*.ts` | 15 |
+| 跨模块冒烟 | `node scripts/integration-smoke.mjs` | 11 |
+
+引擎的 350 项里有 312 项是上游 `675c63a` 原有测试，数量与未改动的上游克隆一致，
+用来确认零回归。冒烟脚本分静态契约、引擎独立模式、融合模式三段，依赖缺失时明确
+报 SKIP 而不是假装通过。
+
+依赖：引擎需要 Python 3.11 与 `engine/requirements.txt`（`rembg` 可选，缺失时生图
+自动降级为占位图）；ECHO 的 app 级测试需要 `projects/echo/apps/echo/node_modules`
+里有 `tsx`。
 
 ## 细节
 

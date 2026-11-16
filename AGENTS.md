@@ -61,14 +61,33 @@ sh scripts/fusion.sh     # 融合        引擎拉起 ECHO 并注入地址
 ## 验证
 
 ```
-node scripts/integration-smoke.mjs                                  # 跨模块冒烟，11 项
-cd engine && python -m pytest quillforge/tests -q -m "not live"      # 引擎，312 项
-cd projects/echo && node --test tests/*.test.mjs                     # echo 仓库级，8 项
-cd projects/echo/apps/echo && for t in scripts/test-*.ts; do node --import tsx $t; done   # 15 项
+sh scripts/test-all.sh                                               # 一键全量
 ```
 
-冒烟脚本分静态契约、引擎独立模式、融合模式三段，依赖缺失时报 SKIP 而非假装通过。
+分段跑：
+
+```
+cd engine && python -m pytest quillforge/tests -q -m "not live"       # 引擎，350 项
+python -m pytest harness/projects/echo/tests -q                       # 接入层，86 项
+node --test harness/projects/echo/tests_js/*.cjs                      # 接入层 JS，18 项
+cd projects/echo && node --test tests/*.test.mjs                      # echo 仓库级，9 项
+cd projects/echo/apps/echo && for t in scripts/test-*.ts; do node --import tsx $t; done   # 15 项
+node scripts/integration-smoke.mjs                                    # 跨模块冒烟，11 项
+```
+
+引擎的 350 项里，312 项来自上游 `675c63a` 原有测试（数量与未改动的上游克隆一致，
+可用来确认零回归），其余 38 项覆盖本次移植进引擎的 `script_registry`、
+`runtime_paths`、带幂等头的 `/api/start` 与 `script_gen` 注册路径。
+
+冒烟脚本分静态契约、引擎独立模式、融合模式三段，依赖缺失时报 SKIP 而非假装通过；
+融合段会轮询等 ECHO 真正 ready（tsx + vite 冷启动十几秒），查一次就判定会误报。
 改动引擎或接入层后至少跑冒烟与引擎 pytest。
+
+血脉 B 的审计测试套件（`tests/audit_*.py`、`run_full_audit.py`，约 1864 行）未移植：
+它按参考版「引擎与 ECHO 同仓、tests 与 src 同级」的布局硬编码路径
+（`SRC_DIR = TESTS_DIR.parent / "src"`），在本仓库 engine/harness 分离的布局下全部失效，
+且 `audit_findings.json` 是当时的问题基线快照、`test_audit_d_live.py` 需要实时大模型。
+移植等于重写并重新基线，故未做。
 
 ## 已知的坑
 
@@ -83,6 +102,18 @@ cd projects/echo/apps/echo && for t in scripts/test-*.ts; do node --import tsx $
   用 `app.openapi()["paths"]` 核验。
 - 上游 `gewuzaojing-echo@main` 的 `tests/public-docs.test.mjs` 有一个自带失败
   （README 缺「索尔维会议」表述），本仓库已顺手修掉。
+- **`script_id` 必须是 `uuid4().hex`（32 位十六进制）**。`script_registry` 用
+  `re.fullmatch(r"[0-9a-f]{32}", ...)` 校验，上游取的 `str(uuid4())[:8]` 会被全数拒绝，
+  前端只能看到「生成未完成」，而服务端日志原先只记异常类名、不记错误码。
+- **所有 LLM 客户端都要 `extra_body={"thinking": {"type": "disabled"}}`**。
+  `sut.py` 与 `realtime_engine.py` 本来就有，上游唯独 `_build_script_gen_client` 漏了；
+  思考模型会把 `max_tokens` 耗尽在 reasoning 上返回空串，而 `generate_script` 的
+  Step 1A/1B 解析到空串只静默返回 None、`max_retries` 默认 1 等于不重试，
+  表现为剧本生成随机失败。已补齐，并给静默失败加了告警日志。
+- 生成的剧本落在 `engine/quillforge/samples/`（`SAMPLES_DIR`），**不在**
+  `QUILLFORGE_VAR_DIR` 下——这是上游行为，`register_generated_script` 也要求
+  剧本目录必须在 `SAMPLES_DIR` 之内。跑完验证记得清掉新增的未跟踪目录，
+  别混进提交。
 
 ## 提交约定
 
