@@ -18,7 +18,7 @@ function engineOrigin(): string {
   return DEFAULT_ENGINE_ORIGIN;
 }
 
-/** 世界编织入口：直跳引擎挂载的编织游戏（/weave），不携带任何预选参数 */
+/** 世界编织入口：回到引擎自己的项目首页，不携带任何预选参数 */
 export function buildProjectTwoEntryUrl(
   request: LaunchVrExperienceRequest,
 ): string | undefined {
@@ -29,5 +29,5 @@ export function buildProjectTwoEntryUrl(
   ) {
     return undefined;
   }
-  return `${engineOrigin()}/weave/`;
+  return `${engineOrigin()}/`;
 }

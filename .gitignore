@@ -1,6 +1,3 @@
-# 上游参照克隆，仅供比对，不纳入版本管理
-_upstream/
-
 # 系统
 .DS_Store
 Thumbs.db

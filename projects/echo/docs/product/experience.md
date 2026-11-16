@@ -1,13 +1,45 @@
-# Product experience
+# 产品体验
 
-The Solvay 1927 route is handcrafted, fact-constrained content. Project Two is the generative workshop; it does not replace or rewrite the Solvay route.
+ECHO 以记忆修复为主线，提供三条体验动线：手工考据的索尔维 1927、生成式的世界
+编织，以及从办公室出发的主线探索。
 
-In the VR laboratory, interact with the standalone female researcher below the portal. Her first menu is exactly:
+## 记忆修复主线
+
+从苏然的办公室开始，和林晓一起追查匿名委托。玩家经过天文实验室、ARPES 实验室
+与 VR 实验室，逐步收集线索与道具，最终进入记忆回溯。任务链、对白与场景互动
+共同推进，选择会影响属性与后续分支。
+
+## 索尔维 1927
+
+索尔维路线是手工制作、高事实约束的内容，不依赖大模型即可完整游玩。玩家在会议
+现场与爱因斯坦、玻尔、居里夫人、洛伦兹等人交互，经历入场影像、CG、言弹辩驳与
+多结局。
+
+言弹辩驳把理论拆成可击破的推理链：共轭准备、相位漂移、条纹洗平。玩家需要击中
+具体的推理环节，而不是选择术语；错误言弹会明确说明没有击中的原因。
+
+## 世界编织
+
+在 VR 实验室与传送门下方的独立研究员交互，第一级菜单固定为：
 
 - 体验现有世界
 - 世界编织
 - 暂时离开
 
-`世界编织` continues through theme and role selection, opens the narrative engine inside Echo, generates a worldbook, presents it for review, and starts the GALGAME only after confirmation. The Echo chrome provides retry and 返回实验室. Escape delegates to Echo's system menu; save, load, continue, return-title and exit remain host-game actions.
+`体验现有世界` 进入索尔维 1927。`世界编织` 先选择主题与角色，再在游戏内 iframe
+打开叙事引擎，生成世界书并供玩家审阅；只有确认后才开始 GALGAME。界面提供重试与
+返回实验室。
 
-When no engine address is configured, `世界编织` reports that the narrative engine is not connected instead of failing silently. 体验现有世界 and the Solvay route are unaffected.
+没有配置引擎地址时，`世界编织` 明确提示叙事引擎未接入，不会静默失败；
+`体验现有世界` 与索尔维路线不受影响。
+
+## 宿主功能
+
+- 标题页：新游戏、继续游戏、读取存档。
+- 系统菜单：存档、读档、设置、返回标题、退出。
+- 对白：立绘、说话人、表情、打字机、历史记录、自动播放。
+- 探索：像素地图、点击寻路、NPC 与道具交互、场景传送。
+- 进度：任务追踪、背包、Flags、自动存档与三个手动存档位。
+
+引擎页面内的 Escape 转交给 ECHO 暂停菜单；存档、读档、继续游戏、返回标题与
+退出始终是宿主游戏的动作。

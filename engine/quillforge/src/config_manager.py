@@ -32,6 +32,7 @@ class QuillForgeSettings(BaseSettings):
     deepseek_base_url: str = Field(default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL")
     deepseek_model: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
     script_gen_model: str = Field(default="deepseek-v4-flash", alias="SCRIPT_GEN_MODEL")
+    llm_fallback_models: str = Field(default="", alias="DEEPSEEK_FALLBACK_MODELS")
 
     # ── LLM 调用参数 ──
     llm_temperature: float = 0.8
@@ -73,11 +74,12 @@ class QuillForgeSettings(BaseSettings):
     # ── TTS 配置 ──
     tts_api_key: str = Field(default="", alias="TTS_API_KEY")
     tts_base_url: str = Field(default="", alias="TTS_BASE_URL")
-    tts_model: str = Field(default="mimo-v2.5-tts-voiceclone", alias="TTS_MODEL")
-    tts_fallback_model: str = Field(default="mimo-v2.5-tts", alias="TTS_FALLBACK_MODEL")
-    tts_default_voice: str = Field(default="mimo_default", alias="TTS_DEFAULT_VOICE")
-    tts_default_voice_male: str = Field(default="苏打", alias="TTS_DEFAULT_VOICE_MALE")
-    tts_default_voice_female: str = Field(default="冰糖", alias="TTS_DEFAULT_VOICE_FEMALE")
+    tts_protocol: str = Field(default="", alias="TTS_PROTOCOL")
+    tts_model: str = Field(default="", alias="TTS_MODEL")
+    tts_fallback_model: str = Field(default="", alias="TTS_FALLBACK_MODEL")
+    tts_default_voice: str = Field(default="", alias="TTS_DEFAULT_VOICE")
+    tts_default_voice_male: str = Field(default="", alias="TTS_DEFAULT_VOICE_MALE")
+    tts_default_voice_female: str = Field(default="", alias="TTS_DEFAULT_VOICE_FEMALE")
     tts_voice_map: str = Field(default="", alias="TTS_VOICE_MAP")
     tts_voice_male_by_age: str = Field(default="", alias="TTS_VOICE_MALE_BY_AGE")
     tts_voice_female_by_age: str = Field(default="", alias="TTS_VOICE_FEMALE_BY_AGE")
@@ -87,6 +89,7 @@ class QuillForgeSettings(BaseSettings):
     image_api_key: str = Field(default="", alias="IMAGE_API_KEY")
     image_base_url: str = Field(default="", alias="IMAGE_BASE_URL")
     image_model: str = Field(default="black-forest-labs/FLUX.1-schnell", alias="IMAGE_MODEL")
+    image_fallback_models: str = Field(default="", alias="IMAGE_FALLBACK_MODELS")
     image_quality: str = Field(default="", alias="IMAGE_QUALITY")
     image_watermark: str = Field(default="", alias="IMAGE_WATERMARK")
 

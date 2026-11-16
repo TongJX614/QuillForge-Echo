@@ -30,7 +30,7 @@ const STORY_BEATS = [
 export interface NarrativeContext {
   sceneId?: string;
   stage?: string;
-  questProgress?: string[];
+  questProgress?: Array<string | { id?: string; title?: string; stepIndex?: number; stepDesc?: string }>;
   flags?: string[];
 }
 
@@ -78,7 +78,15 @@ export function buildContextSummary(ctx: NarrativeContext | undefined): string {
   }
 
   if (ctx.questProgress && ctx.questProgress.length > 0) {
-    parts.push(`【当前任务】${ctx.questProgress.join('；')}`);
+    const questText = ctx.questProgress
+      .map((q) => {
+        if (typeof q === 'string') return q;
+        const title = q.title || q.id || '';
+        return q.stepDesc ? `${title}（当前步骤：${q.stepDesc}）` : title;
+      })
+      .filter(Boolean)
+      .join('；');
+    if (questText) parts.push(`【当前任务】${questText}`);
   }
 
   if (ctx.flags && ctx.flags.length > 0) {

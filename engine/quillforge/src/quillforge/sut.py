@@ -160,14 +160,15 @@ class NarrativeSUT:
         except (TypeError, ValueError):
             _t = 90.0
         timeout_s = _t / 1000.0 if _t >= 1000 else _t
-        # 使用统一 LLM 客户端，从配置文件读取参数
+        # 使用统一 LLM 客户端，从配置文件读取参数；前端设置页带了自己的 Key 时优先使用
+        from provider_key import current_provider_key
         self.llm = LLMClient(
             model=llm_cfg.get("model", "deepseek-chat"),
             temperature=llm_cfg.get("temperature", 0.8),
             max_tokens=llm_cfg.get("maxTokens", 3000),
             timeout=timeout_s,
             connect_timeout=10.0,
-            api_key=llm_cfg.get("apiKey") or None,
+            api_key=current_provider_key() or llm_cfg.get("apiKey") or None,
             api_base=llm_cfg.get("apiBase") or None,
             extra_body={"thinking": {"type": "disabled"}},
         )

@@ -45,6 +45,29 @@ def _get_settings_safe():
         return None
 
 
+def _friendly_model_error(error: Exception, model: str) -> str:
+    """把生图异常翻译成用户能看懂的短句（SSE 推给前端展示）。"""
+    safety = moderation_error_or_none(error)
+    if safety is not None:
+        return "提示词被内容审核拦截"
+    status = getattr(error, "status_code", None)
+    text = str(error)
+    if status in (401, 403):
+        return "API Key 无效或没有生图权限"
+    if status == 402:
+        return "账户余额不足"
+    if status == 404:
+        return f"模型 {model} 不存在或未开通"
+    if status == 429:
+        return "生图请求过于频繁或额度不足（429）"
+    name = type(error).__name__
+    if isinstance(error, TimeoutError) or "timeout" in name.lower() or "timeout" in text.lower():
+        return "生图服务响应超时"
+    if "connection" in name.lower():
+        return "无法连接生图服务，请检查网络或 Base URL"
+    return f"{name}: {text[:160]}"
+
+
 # 生成图片的磁盘缓存目录（QUILLFORGE_VAR_DIR 可整体外置，避免写进引擎安装目录）
 IMAGES_DIR = resolve_runtime_paths().generated_images
 
@@ -89,12 +112,14 @@ STYLE_SUFFIX_BG = (
 )
 
 
-# ── 全局图片生成请求串行化 ──
-# 智谱免费档实测同一时刻只允许 1 张在生成（并发即 429），因此所有生图调用
-# 串行排队，并保证相邻两次调用至少间隔 _IMG_STAGGER_SEC 秒。
+# ── 生图请求并发控制 ──
+# 千问/DashScope 系按 IMAGE_CONCURRENCY 多路并发；智谱免费档实测同一时刻
+# 只允许 1 张在生成（并发即 429），仍保持串行并保证相邻调用间隔。
 _IMG_STAGGER_SEC = float(os.environ.get("IMAGE_STAGGER_SEC", "1.5"))
+_IMG_MAX_INFLIGHT = max(1, int(os.environ.get("IMAGE_CONCURRENCY", "8")))
+_img_inflight = threading.BoundedSemaphore(_IMG_MAX_INFLIGHT)
 _img_stagger_lock = threading.Lock()
-_img_call_lock = threading.Lock()  # 保证同一时刻只有一个 images.generate 在飞
+_img_call_lock = threading.Lock()  # 非千问系：同一时刻只有一个 images.generate 在飞
 _img_next_slot = 0.0
 
 
@@ -243,6 +268,44 @@ def _defringe(img):
     return _Img.fromarray(data.clip(0, 255).astype(np.uint8), "RGBA")
 
 
+def _remove_background_pil(image_path: Path) -> bool:
+    """没有 rembg 时的兜底：纯 PIL 绿幕抠图（只对绿幕生成图有效，非 AI 分割）。"""
+    try:
+        from PIL import Image
+
+        img = Image.open(image_path).convert("RGBA")
+        w, h = img.size
+        if w * h > 6_000_000:
+            return False
+        px = img.load()
+        removed = 0
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = px[x, y]
+                if a == 0:
+                    continue
+                base = max(r, b)
+                if g > r + 40 and g > b + 40 and g > 80:
+                    if a > 200:
+                        px[x, y] = (r, g, b, 0)
+                        removed += 1
+                    elif a > 50:
+                        greenness = min((g - base) / 255.0, 1.0)
+                        px[x, y] = (r, g, b, int(a * (1.0 - greenness)))
+                elif g > base + 15:
+                    px[x, y] = (r, base, b, a)
+                elif g > base + 8:
+                    ratio = (g - base - 8) / 7.0
+                    px[x, y] = (r, int(g - (g - base) * ratio), b, a)
+        if removed == 0:
+            return False
+        img.save(image_path, format="PNG")
+        return True
+    except Exception as e:
+        print(f"[image_gen] 纯 PIL 绿幕抠图失败: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
 # rembg session 单例（避免每次调用都重新初始化/下载模型，并发安全）
 _rembg_session = None
 _rembg_session_lock = threading.Lock()
@@ -272,6 +335,10 @@ def remove_background(image_path: Path) -> bool:
     成功返回 True，失败返回 False（保留原图不破坏）。"""
     try:
         from rembg import remove
+    except Exception:
+        # 引擎默认 venv 不装 rembg/onnxruntime，回退到纯 PIL 绿幕抠图
+        return _remove_background_pil(image_path)
+    try:
         from PIL import Image
 
         session = _get_rembg_session()
@@ -297,7 +364,7 @@ def remove_background(image_path: Path) -> bool:
         return True
     except Exception as e:
         print(f"[image_gen] rembg 去背景失败: {type(e).__name__}: {e}", flush=True)
-        return False
+        return _remove_background_pil(image_path)
 
 
 class ImageGenerator:
@@ -306,12 +373,13 @@ class ImageGenerator:
     # 402 余额不足熔断：触发后 10 分钟内跳过所有生图请求（重试无意义）
     _PERMANENT_FAIL_COOLDOWN = 600.0
 
-    def __init__(self):
+    def __init__(self, api_key: str | None = None):
         self._permanent_fail_until = 0.0
         _settings = _get_settings_safe()
         self.api_key = (
-            _settings.image_api_key.strip() if _settings
-            else os.environ.get("IMAGE_API_KEY", "").strip()
+            api_key.strip() if api_key else
+            (_settings.image_api_key.strip() if _settings
+             else os.environ.get("IMAGE_API_KEY", "").strip())
         )
         base_url = (
             _settings.image_base_url.strip() if _settings
@@ -322,6 +390,21 @@ class ImageGenerator:
             _settings.image_model.strip() if _settings
             else os.environ.get("IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
         )
+        # 备选生图模型：主模型不可用时按顺序切换（共用同一 Key / Base URL）
+        raw_fallback = (
+            _settings.image_fallback_models if _settings
+            else os.environ.get("IMAGE_FALLBACK_MODELS", "")
+        )
+        self.fallback_models = [
+            m.strip() for m in (raw_fallback or "").split(",")
+            if m.strip() and m.strip() != self.model
+        ]
+        # 模型级冷却：某模型确认失败后 60s 内直接跳过，
+        # 避免并发任务在模型故障期间反复撞同一个坏模型
+        self._model_cooldown: dict[str, float] = {}
+        # 每个素材的失败原因（供 SSE 推给前端展示）
+        self._failures: dict[str, str] = {}
+        self._failure_lock = threading.Lock()
         # 可选：画质（hd/standard，空则用模型默认）
         self.quality = (
             _settings.image_quality.strip() if _settings
@@ -337,6 +420,20 @@ class ImageGenerator:
             self.watermark_enabled = False
         elif wm in ("true", "1", "on", "yes"):
             self.watermark_enabled = True
+        # 千问/DashScope 系接口默认开启 prompt_extend（先用大模型扩写提示词），
+        # 实测单张因此多耗 70 秒以上；提示词本身已足够具体，默认关闭。
+        self._dashscope_like = any(
+            token in (self.base_url or "").lower()
+            for token in ("dashscope", "aliyun", "qianwen", "qwen")
+        )
+        _pe = os.environ.get("IMAGE_PROMPT_EXTEND", "").strip().lower()
+        self.prompt_extend = None
+        if _pe in ("false", "0", "off", "no"):
+            self.prompt_extend = False
+        elif _pe in ("true", "1", "on", "yes"):
+            self.prompt_extend = True
+        elif self._dashscope_like:
+            self.prompt_extend = False
         self.client = None
         if self.api_key:
             try:
@@ -351,13 +448,28 @@ class ImageGenerator:
     def enabled(self) -> bool:
         return self.client is not None
 
-    def _cache_path(self, script_slug: str, kind: str, asset_id: str, prompt: str, size: str) -> Path:
+    def _cache_path(self, script_slug: str, kind: str, asset_id: str, prompt: str,
+                    size: str, model: str | None = None) -> Path:
         """缓存文件名含 (model|size|prompt) 的哈希：提示词/模型变化时自动重新生成"""
-        h = hashlib.md5(f"{self.model}|{size}|{prompt}".encode("utf-8")).hexdigest()[:8]
+        h = hashlib.md5(f"{model or self.model}|{size}|{prompt}".encode("utf-8")).hexdigest()[:8]
         safe_id = re.sub(r"[^\w\u4e00-\u9fff]+", "_", str(asset_id or "x")).strip("_") or "x"
         d = IMAGES_DIR / script_slug
         d.mkdir(parents=True, exist_ok=True)
         return d / f"{kind}_{safe_id}_{h}.png"
+
+    # ── 失败原因（供 SSE 展示）──
+
+    def _record_failure(self, kind: str, asset_id: str, reason: str) -> None:
+        with self._failure_lock:
+            self._failures[f"{kind}/{asset_id}"] = reason
+
+    def _clear_failure(self, kind: str, asset_id: str) -> None:
+        with self._failure_lock:
+            self._failures.pop(f"{kind}/{asset_id}", None)
+
+    def failure_reason(self, kind: str, asset_id: str) -> str:
+        with self._failure_lock:
+            return self._failures.get(f"{kind}/{asset_id}", "")
 
     def _find_external_asset(self, script_slug: str, kind: str, asset_id: str) -> Path | None:
         """在缓存目录中查找外部提供的素材文件（非标准哈希命名）。
@@ -387,16 +499,26 @@ class ImageGenerator:
         candidates.sort(key=lambda p: p.name)
         return candidates[0]
 
+    def _model_chain(self) -> list[str]:
+        return [self.model] + [m for m in self.fallback_models if m != self.model]
+
     def generate(self, script_slug: str, kind: str, asset_id: str, prompt: str, size: str) -> str | None:
         """
         生成图片并缓存到磁盘。
         返回可访问的 URL 路径（/generated_images/<slug>/<file>.png）；未启用或失败返回 None。
+        主模型失败时按 IMAGE_FALLBACK_MODELS 顺序自动切换。
         """
-        path = self._cache_path(script_slug, kind, asset_id, prompt, size)
-        rel_url = f"/generated_images/{script_slug}/{path.name}"
+        models = self._model_chain()
+        paths = {
+            model: self._cache_path(script_slug, kind, asset_id, prompt, size, model=model)
+            for model in models
+        }
 
-        # 命中缓存：直接复用，不重复调用 API
-        if path.exists() and path.stat().st_size > 0:
+        # 命中任一模型缓存：直接复用（含上次切换到备选模型生成的结果）
+        for model in models:
+            path = paths[model]
+            if not (path.exists() and path.stat().st_size > 0):
+                continue
             # 角色立绘额外检查：若应有透明通道但实际没有（上次 rembg 失败），补跑一次
             if kind == "char" and _REMOVE_BG_ENABLED:
                 try:
@@ -409,27 +531,79 @@ class ImageGenerator:
                         remove_background(path)
                 except Exception as e:
                     logger.warning("[image_gen] 缓存透明通道检查失败 (%s): %s", path.name, e)
-            return rel_url
+            self._clear_failure(kind, asset_id)
+            return f"/generated_images/{script_slug}/{path.name}"
 
         # 标准缓存未命中 → 尝试查找外部提供的素材（用户手动替换的图片）
         ext_path = self._find_external_asset(script_slug, kind, asset_id)
         if ext_path and ext_path.stat().st_size > 0:
             ext_url = f"/generated_images/{script_slug}/{ext_path.name}"
             print(f"[image_gen] 使用外部素材: {ext_path.name} (for {kind}/{asset_id})", flush=True)
+            self._clear_failure(kind, asset_id)
             return ext_url
 
         if not self.enabled:
+            self._record_failure(kind, asset_id, "未配置生图 Key（可在引擎首页「设置」里填写）")
             return None
 
-        # 熔断中：账户余额不足等永久性错误，跳过请求
+        # 熔断中：账户余额不足/鉴权失败等账号级错误，换模型也没用
         if time.time() < self._permanent_fail_until:
+            self._record_failure(kind, asset_id, "生图账户鉴权或余额异常，已暂停生图 10 分钟")
             return None
 
-        kwargs = dict(model=self.model, prompt=prompt, size=size, n=1)
+        failure_notes: list[str] = []
+        for idx, model in enumerate(models):
+            if time.time() < self._model_cooldown.get(model, 0.0):
+                failure_notes.append(f"{model}：近期失败，暂跳过")
+                continue
+            path = paths[model]
+            rel_url = f"/generated_images/{script_slug}/{path.name}"
+            error = self._generate_with_model(
+                model, path, kind=kind, asset_id=asset_id, prompt=prompt, size=size,
+            )
+            if error is None:
+                if idx > 0:
+                    print(f"[image_gen] 已切换到备选模型 {model} 生成成功: {kind}/{asset_id}", flush=True)
+                self._clear_failure(kind, asset_id)
+                return rel_url
+
+            reason = _friendly_model_error(error, model)
+            failure_notes.append(f"{model}：{reason}")
+            status = getattr(error, "status_code", None)
+            if status in (401, 402, 403) or "余额不足" in str(error):
+                self._permanent_fail_until = time.time() + self._PERMANENT_FAIL_COOLDOWN
+                print(f"[image_gen] 账号级错误（{reason}），"
+                      f"{self._PERMANENT_FAIL_COOLDOWN:.0f}s 内跳过所有生图请求", flush=True)
+                break
+            if moderation_error_or_none(error) is None:
+                self._model_cooldown[model] = time.time() + 60.0
+            nxt = f"，尝试备选 {models[idx + 1]}" if idx + 1 < len(models) else ""
+            print(f"[image_gen] 模型 {model} 生成失败（{reason}）{nxt}", flush=True)
+
+        summary = "；".join(failure_notes) or "没有可用的生图模型"
+        self._record_failure(kind, asset_id, summary)
+        msg = f"[image_gen] 生成失败 {kind}/{asset_id}: {summary}"
+        print(msg, flush=True)
+        try:
+            with open(IMAGES_DIR / "error.log", "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except Exception as e:
+            logger.warning("[image_gen] error.log 写入失败: %s", e)
+        return None
+
+    def _generate_with_model(self, model: str, path: Path, *, kind: str,
+                             asset_id: str, prompt: str, size: str) -> Exception | None:
+        """用指定模型生成单张图；成功返回 None，失败返回最后一次异常。"""
+        kwargs = dict(model=model, prompt=prompt, size=size, n=1)
         if self.quality:
             kwargs["quality"] = self.quality
         extra_body = {}
-        if self.watermark_enabled is not None:
+        if self._dashscope_like:
+            # DashScope 的参数名是 watermark / prompt_extend；不传则默认加水印、开提示词扩写
+            extra_body["watermark"] = self.watermark_enabled is True
+            if self.prompt_extend is not None:
+                extra_body["prompt_extend"] = self.prompt_extend
+        elif self.watermark_enabled is not None:
             extra_body["watermark_enabled"] = self.watermark_enabled
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -442,15 +616,17 @@ class ImageGenerator:
             RateLimitError = None
             retryable = ()
         max_attempts = 4
-        last_err = None
+        last_err: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                # 串行调用：并发只会让免费额度互相触发 429
-                with _img_call_lock:
-                    _img_stagger()
+                # 千问系走并发信号量；其他服务商保持串行错峰，避免免费额度 429
+                limiter = _img_inflight if self._dashscope_like else _img_call_lock
+                with limiter:
+                    if not self._dashscope_like:
+                        _img_stagger()
                     # 排队期间同素材可能已被预生成任务写完，直接复用，避免重复调用 API
                     if path.exists() and path.stat().st_size > 0:
-                        return rel_url
+                        return None
                     resp = self.client.images.generate(**kwargs)
                     item = resp.data[0]
                     b64 = getattr(item, "b64_json", None)
@@ -462,8 +638,7 @@ class ImageGenerator:
                         with urllib.request.urlopen(url, timeout=90) as resp_dl:
                             path.write_bytes(resp_dl.read())
                     else:
-                        print(f"[image_gen] {kind}/{asset_id}: 响应中既无 b64_json 也无 url", flush=True)
-                        return None
+                        return RuntimeError("生图响应中既无 b64_json 也无 url")
 
                 # 角色立绘：AI 去背景（白底 → 透明）
                 if kind == "char" and _REMOVE_BG_ENABLED:
@@ -471,53 +646,30 @@ class ImageGenerator:
                     if remove_background(path):
                         print(f"[image_gen] {asset_id} 背景去除完成", flush=True)
 
-                return rel_url
+                return None
             except retryable as e:
                 last_err = e
                 if attempt < max_attempts:
                     wait = attempt * 3
-                    print(f"[image_gen] {kind}/{asset_id} 连接异常，{wait}s 后重试({attempt}/{max_attempts}): {e}", flush=True)
+                    print(f"[image_gen] {kind}/{asset_id} 连接异常，{wait}s 后重试"
+                          f"({attempt}/{max_attempts})[{model}]: {e}", flush=True)
                     time.sleep(wait)
                     continue
+                return last_err
             except Exception as e:
-                # 内容审核拒绝：同一提示词重试必然再次被拦，直接放弃并回退占位图
+                # 内容审核拒绝：同一提示词重试必然再次被拦，交给外层尝试下一个模型
                 safety = moderation_error_or_none(e)
                 if safety is not None:
-                    last_err = safety
-                    print(f"[image_gen] {kind}/{asset_id} 提示词被内容审核拦截，回退占位图", flush=True)
-                    break
+                    print(f"[image_gen] {kind}/{asset_id} 提示词被内容审核拦截（{model}）", flush=True)
+                    return safety
                 # 429 速率限制：指数退避重试；但「余额不足」类 429 是永久性错误
                 if RateLimitError and isinstance(e, RateLimitError) and attempt < max_attempts:
                     if "余额不足" in str(e) or "insufficient" in str(e).lower():
-                        self._permanent_fail_until = time.time() + self._PERMANENT_FAIL_COOLDOWN
-                        print(f"[image_gen] 检测到余额不足（429），{self._PERMANENT_FAIL_COOLDOWN:.0f}s 内跳过所有生图请求", flush=True)
-                        last_err = e
-                        break
-                    # 等待期间其他线程可能已触发 402 熔断，不再重试
-                    if time.time() >= self._permanent_fail_until:
-                        last_err = e
-                        wait = attempt * 15  # 15s, 30s, 45s
-                        print(f"[image_gen] {kind}/{asset_id} 触发速率限制，{wait}s 后重试({attempt}/{max_attempts})", flush=True)
-                        time.sleep(wait)
-                        continue
-                    last_err = e
-                    break
-                # 401/402/403 等永久性错误（鉴权/余额/权限）重试无意义，立即放弃
-                status = getattr(e, "status_code", None)
-                if status in (401, 402, 403):
-                    if status == 402:
-                        self._permanent_fail_until = time.time() + self._PERMANENT_FAIL_COOLDOWN
-                        print(f"[image_gen] 检测到 402 余额不足，{self._PERMANENT_FAIL_COOLDOWN:.0f}s 内跳过所有生图请求", flush=True)
-                    last_err = e
-                    break
-                last_err = e
-                break
-
-        msg = f"[image_gen] 生成失败 {kind}/{asset_id}: {type(last_err).__name__}: {last_err}"
-        print(msg, flush=True)
-        try:
-            with open(IMAGES_DIR / "error.log", "a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-        except Exception as e:
-            logger.warning("[image_gen] error.log 写入失败: %s", e)
-        return None
+                        return e
+                    wait = attempt * 15  # 15s, 30s, 45s
+                    print(f"[image_gen] {kind}/{asset_id} 触发速率限制，{wait}s 后重试"
+                          f"({attempt}/{max_attempts})[{model}]", flush=True)
+                    time.sleep(wait)
+                    continue
+                return e
+        return last_err

@@ -1,17 +1,57 @@
-# Architecture
+# 架构概览
 
-## Modules
+## 模块
 
-- Echo owns the pixel RPG, scenes, dialogue, saves, system menu and in-game web container.
-- An external narrative engine owns worldbook generation, review, sessions, GALGAME pages and generated mini-games. It is not part of this repository.
-- `shared/contracts` owns the only cross-application environment and iframe message interfaces.
+| 模块 | 位置 | 职责 |
+| --- | --- | --- |
+| ECHO 像素 RPG | `apps/echo/` | 场景、对白、任务、背包、系统菜单、存档、游戏内网页容器 |
+| Express 侧 | `apps/echo/server/` | 运行时配置、对话与任务生成代理、静态资源 |
+| 叙事引擎 | 融合仓库的 `engine/` | 世界书、剧本、对白、生图、TTS、校验 |
+| 接入层 | 融合仓库的 `harness/` | 把 ECHO 的节拍与引擎连接起来，管理子进程与中断态 |
+| 共享契约 | `shared/contracts/` | 唯一的跨应用环境与 iframe 消息接口 |
 
-## Seam and adapters
+`apps/echo/` 与 `shared/` 可以独立运行；引擎与接入层在融合仓库中存在，但 ECHO
+不导入它们的任何模块。
 
-Echo never imports engine modules; it opens the configured local URL in an iframe and consumes the shared message vocabulary. The engine never reads Echo game state; its browser adapter announces readiness, requests the Echo pause menu on Escape, and receives pause/resume notifications.
+## 边界
 
-Echo stays runnable without an engine. `NARRATIVE_ENGINE_HOST` and `NARRATIVE_ENGINE_PORT` are optional: when the fusion launcher starts both sides it injects them, and when they are absent the generative entry points degrade to unavailable while handcrafted content keeps working.
+- **状态所有权**：场景、任务、Flags、背包与存档只由 ECHO 写。引擎和接入层只
+  返回候选内容与受控 actions。
+- **通信方式**：ECHO 通过 HTTP 请求接入层；世界编织通过 iframe 打开引擎页面，
+  并使用 `shared/contracts/embed-messages.json` 的消息词汇表。
+- **地址注入**：`NARRATIVE_ENGINE_HOST` 与 `NARRATIVE_ENGINE_PORT` 由融合启动器
+  注入；ECHO 不写死引擎位置，也不依赖引擎内部实现。
+- **暂停菜单**：引擎页面的 Escape 通过消息契约转交给 ECHO，由宿主决定是否打开
+  系统菜单；引擎的浏览器适配器只负责宣布就绪与接收暂停/恢复通知。
+- **降级**：没有引擎地址时，世界编织入口明确提示不可用，索尔维 1927 与记忆修复
+  主线不受影响。
 
-## Experience sequence
+## 一次生成请求
 
-`Echo VR researcher → iframe → engine worldbook review → GALGAME`
+```text
+玩家操作
+  → ECHO 产生游戏事件（对话、任务、结局、世界编织入口）
+  → Express 侧或前端适配器请求接入层
+  → 接入层按节拍映射剧本与上下文
+  → 引擎生成并校验
+  → 返回候选对白 / 选项 / actions
+  → ECHO 校验并执行受控状态动作
+```
+
+## 端口
+
+| 模式 | ECHO | 引擎 |
+| --- | --- | --- |
+| 独立开发 | 5000 | 不启动，可选连接外部引擎 |
+| 融合 | 5173，被占用时顺延 | 8050 |
+
+融合模式下 ECHO 由接入层的 `echo_launcher` 在后台拉起，日志在
+`projects/echo/.run/echo.log`；启动失败只影响 ECHO，引擎继续可用。
+
+## 体验链路
+
+```text
+ECHO 记忆修复主线 → VR 实验室 → 研究员菜单
+  ├─ 体验现有世界 → 索尔维 1927（手工路线）
+  └─ 世界编织 → iframe → 世界书审阅 → GALGAME（生成路线）
+```

@@ -216,6 +216,24 @@
       "x": 22,
       "y": 11,
       "exists": true
+    },
+    "memory_repair_console": {
+      "sceneId": "office",
+      "x": 10,
+      "y": 5,
+      "exists": true
+    },
+    "lisa_spectrum_record": {
+      "sceneId": "astro",
+      "x": 21,
+      "y": 14,
+      "exists": true
+    },
+    "memory_repair_vr": {
+      "sceneId": "vr",
+      "x": 10,
+      "y": 12,
+      "exists": true
     }
   },
   "overrides": {
@@ -614,6 +632,10 @@
       "solvay_diffraction": {
         "x": 11.147971360381861,
         "y": 7.313842482100238
+      },
+      "memory_repair_console": {
+        "x": 15.716814159292035,
+        "y": 14.453097345132743
       }
     },
     "2": {
@@ -627,37 +649,17 @@
         "y": 10,
         "exists": true
       },
-      "solvay_pauli": {
-        "x": 25.968973747016705,
-        "y": 26.774463007159902
-      },
       "solvay_heisenberg": {
-        "x": 31.31742243436754,
-        "y": 29.223150357995227,
         "spriteVariant": "side"
       },
       "solvay_schrodinger": {
-        "x": 30.608591885441527,
-        "y": 29.60978520286396,
         "spriteVariant": "side"
       },
       "solvay_curie": {
-        "x": 24.68019093078759,
-        "y": 29.352028639618137,
         "spriteVariant": "back"
       },
       "solvay_einstein": {
-        "x": 27.257756563245824,
-        "y": 26.903341288782816,
         "spriteVariant": "back"
-      },
-      "solvay_bohr": {
-        "x": 34.088305489260144,
-        "y": 26.83890214797136
-      },
-      "solvay_born": {
-        "x": 32.5417661097852,
-        "y": 29.094272076372313
       }
     },
     "3": {
@@ -665,41 +667,17 @@
         "x": 3.818867924528302,
         "y": 7.350943396226415
       },
-      "solvay_curie": {
-        "x": 29.062052505966587,
-        "y": 24.454653937947494
-      },
       "solvay_bohr": {
-        "x": 34.99045346062052,
-        "y": 7.700477326968974,
         "spriteVariant": "back"
       },
       "solvay_lorentz": {
-        "x": 30.157517899761334,
-        "y": 24.390214797136036,
         "spriteVariant": "side"
       },
-      "solvay_pauli": {
-        "x": 32.79952267303103,
-        "y": 7.700477326968974
-      },
       "solvay_einstein": {
-        "x": 35.05489260143198,
-        "y": 6.798329355608591,
         "spriteVariant": "front"
       },
       "solvay_schrodinger": {
-        "x": 36.536992840095465,
-        "y": 4.607398568019093,
         "spriteVariant": "front"
-      },
-      "solvay_heisenberg": {
-        "x": 30.99522673031026,
-        "y": 6.218377088305489
-      },
-      "solvay_born": {
-        "x": 36.665871121718375,
-        "y": 6.927207637231503
       }
     }
   },
@@ -761,13 +739,6 @@
         "targetScene": "vr",
         "targetX": 10,
         "targetY": 17
-      },
-      {
-        "x": 16,
-        "y": 12,
-        "targetScene": "office",
-        "targetX": 12,
-        "targetY": 10
       }
     ]
   }

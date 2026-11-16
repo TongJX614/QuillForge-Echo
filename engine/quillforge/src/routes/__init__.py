@@ -13,3 +13,4 @@ from .auto_run import router as auto_run_router
 from .session import router as session_router
 from .realtime import router as realtime_router
 from .assets import router as assets_router
+from .settings import router as settings_router

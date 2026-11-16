@@ -191,7 +191,8 @@ async def upload_directory(files: list[UploadFile] = File(...)):
 
 @router.get("/api/samples")
 def list_samples():
-    """列出内置示例剧本（支持单文件和目录结构）"""
+    """列出内置示例剧本（支持单文件和目录结构），按最近修改时间倒序"""
+    registry = get_registry()
     samples = []
     if SAMPLES_DIR.exists():
         for f in sorted(SAMPLES_DIR.glob("*")):
@@ -202,29 +203,29 @@ def list_samples():
                 )
                 if not has_data:
                     continue
-                try:
-                    adapter = GenericScriptAdapter()
-                    adapter.load(str(f))
-                    samples.append({
-                        "id": f.name,
-                        "filename": f.name,
-                        "path": str(f),
-                        **adapter.to_summary(),
-                    })
-                except Exception:
-                    samples.append({"id": f.name, "filename": f.name, "error": "解析失败"})
+                sample_id = f.name
             elif f.suffix in (".yaml", ".yml", ".json"):
-                try:
-                    adapter = GenericScriptAdapter()
-                    adapter.load(str(f))
-                    samples.append({
-                        "id": f.stem,
-                        "filename": f.name,
-                        "path": str(f),
-                        **adapter.to_summary(),
-                    })
-                except Exception:
-                    samples.append({"id": f.stem, "filename": f.name, "error": "解析失败"})
+                sample_id = f.stem
+            else:
+                continue
+
+            protected = registry.is_sample_protected(f.name)
+            try:
+                adapter = GenericScriptAdapter()
+                adapter.load(str(f))
+                summary = adapter.to_summary()
+            except Exception:
+                summary = {"error": "解析失败"}
+            samples.append({
+                "id": sample_id,
+                "filename": f.name,
+                "path": str(f),
+                "modified": f.stat().st_mtime,
+                "protected": protected,
+                "deletable": f.is_dir() and not protected,
+                **summary,
+            })
+    samples.sort(key=lambda item: (item.get("modified") or 0, item["filename"]), reverse=True)
     return {"samples": samples}
 
 

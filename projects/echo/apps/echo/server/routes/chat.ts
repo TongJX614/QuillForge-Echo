@@ -18,8 +18,14 @@ interface ChatRequest {
   context: {
     sceneId?: string;
     stage?: string;
-    questProgress?: string[];
+    questProgress?: Array<string | {
+      id?: string;
+      title?: string;
+      stepIndex?: number;
+      stepDesc?: string;
+    }>;
     flags?: string[];
+    world?: Record<string, unknown>;
   };
 }
 
@@ -147,6 +153,7 @@ async function proxyChatToEngine(engineBase: string, body: Record<string, unknow
     stage: context.stage ?? '',
     flags: context.flags ?? [],
     quests: context.questProgress ?? [],
+    context,
   };
 
   let engineResp: Response;

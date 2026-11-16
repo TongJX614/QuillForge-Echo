@@ -91,6 +91,20 @@ body { background:#0a0a0f; color:#e0e0e0; font-family:'PingFang SC','Microsoft Y
 </div>
 
 <script>
+// 服务商 Key：与首页共用同一 localStorage，所有请求自动附带
+(function () {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const key = localStorage.getItem('quillforge_provider_key') || '';
+    if (key) {
+      const headers = new Headers(init.headers || {});
+      headers.set('X-Provider-Key', key);
+      init = { ...init, headers };
+    }
+    return origFetch(input, init);
+  };
+})();
+
 const DEFAULT_PATH = '__DEFAULT_PATH__';
 let storyData = null;
 let currentScene = 0;

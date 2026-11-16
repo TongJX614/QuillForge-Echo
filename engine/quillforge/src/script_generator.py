@@ -23,7 +23,7 @@ from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from content_guard import ContentSafetyError, scan_input
-from llm_client import LLMClient
+from llm_client import LLMClient, describe_llm_error
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,6 +53,7 @@ def _build_script_gen_client() -> LLMClient:
     而本模块的 Step 1A/1B 解析到空串时只会静默返回 None。
     """
     model = os.environ.get("SCRIPT_GEN_MODEL", "deepseek-v4-flash")
+    from provider_key import current_provider_key
     return LLMClient(
         model=model,
         temperature=0.85,
@@ -60,6 +61,7 @@ def _build_script_gen_client() -> LLMClient:
         timeout=120.0,
         connect_timeout=10.0,
         extra_body={"thinking": {"type": "disabled"}},
+        api_key=current_provider_key() or None,
     )
 
 
@@ -437,8 +439,11 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
     # ─── Step 1: 基础设定（并行：世界+角色） ───
     yield {"type": "progress", "step": "foundation", "message": "正在并行构思世界观与角色..."}
 
+    last_error: Exception | None = None
+
     def _call_step1a():
         """Call A: 元数据 + 世界书"""
+        nonlocal last_error
         for attempt in range(max_retries):
             try:
                 raw = _sg_client.generate(SYSTEM_PROMPT_STEP1A,
@@ -451,12 +456,14 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
             except ContentSafetyError:
                 raise
             except Exception as e:
+                last_error = e
                 logger.warning("Step 1A attempt %d/%d failed: %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
                     time.sleep(min(2 ** attempt, 10))
         return None
 
     def _call_step1b():
+        nonlocal last_error
         """Call B: 角色 + 角色关系"""
         for attempt in range(max_retries):
             try:
@@ -470,6 +477,7 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
             except ContentSafetyError:
                 raise
             except Exception as e:
+                last_error = e
                 logger.warning("Step 1B attempt %d/%d failed: %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
                     time.sleep(min(2 ** attempt, 10))
@@ -483,7 +491,8 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
         files_b = future_b.result()
 
     if not files_a or not files_b:
-        yield {"type": "error", "message": "基础设定生成失败，请重新输入"}
+        reason = f"：{describe_llm_error(last_error)}" if last_error else ""
+        yield {"type": "error", "message": f"基础设定生成失败{reason}，请重新输入"}
         return
 
     step1_output = {**files_a, **files_b}
@@ -510,6 +519,7 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
 """
 
     def _call_step2a():
+        nonlocal last_error
         """2A: 主线剧情 + 结局系统 + 世界线"""
         for attempt in range(max_retries):
             try:
@@ -522,12 +532,14 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
             except ContentSafetyError:
                 raise
             except Exception as e:
+                last_error = e
                 logger.warning("Step 2A attempt %d/%d failed: %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
                     time.sleep(min(2 ** attempt, 10))
         return None
 
     def _call_step2b():
+        nonlocal last_error
         """2B: 场景清单 + 素材清单 + 事件清单"""
         for attempt in range(max_retries):
             try:
@@ -539,6 +551,7 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
             except ContentSafetyError:
                 raise
             except Exception as e:
+                last_error = e
                 logger.warning("Step 2B attempt %d/%d failed: %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
                     time.sleep(min(2 ** attempt, 10))
@@ -552,10 +565,12 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
         files_2b = fut_b.result()
 
     if not files_2a:
-        yield {"type": "error", "message": "剧情主线生成失败，请重新输入"}
+        reason = f"：{describe_llm_error(last_error)}" if last_error else ""
+        yield {"type": "error", "message": f"剧情主线生成失败{reason}，请重新输入"}
         return
     if not files_2b:
-        yield {"type": "error", "message": "场景设计生成失败，请重新输入"}
+        reason = f"：{describe_llm_error(last_error)}" if last_error else ""
+        yield {"type": "error", "message": f"场景设计生成失败{reason}，请重新输入"}
         return
 
     # ─── Step 2C: 关键选择（需要场景ID） ───
@@ -586,15 +601,17 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
         except ContentSafetyError:
             raise
         except Exception as e:
+            last_error = e
             logger.warning("Step 2C attempt %d/%d failed: %s", attempt + 1, max_retries, e)
             if attempt < max_retries - 1:
                 time.sleep(min(2 ** attempt, 10))
             if attempt >= max_retries - 1:
-                yield {"type": "error", "message": f"关键选择生成失败: {str(e)}"}
+                yield {"type": "error", "message": f"关键选择生成失败：{describe_llm_error(e)}"}
                 return
 
     if files_2c is None:
-        yield {"type": "error", "message": "关键选择生成失败，请重新输入"}
+        reason = f"：{describe_llm_error(last_error)}" if last_error else ""
+        yield {"type": "error", "message": f"关键选择生成失败{reason}，请重新输入"}
         return
 
     step2_output = {**files_2a, **files_2b, **files_2c}

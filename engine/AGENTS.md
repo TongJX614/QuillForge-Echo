@@ -1,218 +1,230 @@
-# AGENTS.md — QuillForge 项目架构指南
+# AGENTS.md — QuillForge 引擎
 
-## 项目概述
+本文件面向修改 `engine/` 的 AI 助手与维护者。仓库级上下文见
+[../AGENTS.md](../AGENTS.md)，使用说明见 [README.md](README.md)。
 
-QuillForge 是一个 AI 驱动的互动叙事生成引擎，基于 FastAPI 构建。支持两种模式：
-- **上传剧本模式**（Harness 管线）：解析 YAML 剧本文件，通过五阶段流水线生成交互式叙事内容
-- **AI 实时生成模式**：通过 `realtime_engine.py` 实时生成剧本
+## 引擎定位
 
-## 架构概览：Harness 五阶段流水线
+QuillForge 是项目无关的 AI 互动叙事生成引擎：读取剧本数据，经五阶段 Harness
+流水线生成旁白、对话与选项，并在 Stage 5 做质量与锚点校验。它不认识 ECHO，
+也不应出现任何具体项目的名称、路径或业务规则。
 
-核心架构为 **Harness 编排器 + SUT 隔离 + 可插拔 Stage**，执行流程：
-
+```text
+Fixture → Stage 1 上下文组装 → Stage 2 叙事锚定 → Stage 3 对话生成
+        → Stage 4 选择分支 → Stage 5 验证门控 → Fixture teardown
+                                      │
+                                      └── 失败时回灌 validationFeedback 重试
 ```
-Fixture Setup → Stage 1 → [重试循环: Stage 2 → 3 → 4 → 5] → Fallback → Output
-```
 
-| 阶段 | 名称 | 职责 | LLM 调用 |
-|------|------|------|----------|
-| Stage 1 | Context Assembly | 组装上下文（角色、世界线、场景） | 无 |
-| Stage 2 | Narrative Anchoring | 生成旁白/叙事文本（≤250字） | 是 |
-| Stage 3 | Dialogue Generation | 生成角色对话（3-15轮），并在同一次调用末尾附带产出玩家选项 | 是 |
-| Stage 4 | Choice Branching | 复用 Stage 3 附带选项；缺失时回退独立 LLM 调用；剧本预设选项直接跳过 | 视情况 |
-| Stage 5 | Validation Gate | 验证质量（性格匹配、主线符合度），失败原因反馈给下一轮重试 Prompt | 视情况（性格词表零命中时追加 1 次 LLM 评审） |
+| 阶段 | 名称 | 职责 | LLM |
+| --- | --- | --- | --- |
+| 1 | Context Assembly | 组装角色、世界线、场景与额外上下文 | 否 |
+| 2 | Narrative Anchoring | 生成旁白，≤250 字 | 是 |
+| 3 | Dialogue Generation | 生成 3-15 轮对话，同次调用附带选项 | 是 |
+| 4 | Choice Branching | 复用 Stage 3 选项；缺失时补调用；预设选项跳过 | 视情况 |
+| 5 | Validation Gate | 质量、性格、主线、实体保真校验 | 视情况 |
 
-关键设计原则：
-- **Harness 是薄编排器**：不含业务逻辑，只负责组装组件和驱动流程
-- **SUT 隔离**：LLM 调用和 Prompt 渲染封装在 `NarrativeSUT` 中，可替换
-- **Observer 模式**：日志、SSE 推送、指标收集通过观察者解耦
-- **三层 Fallback**：对话不足时触发保底生成（LLM 重试 → 模板生成 → 硬编码兜底）
-- **Fixture 系统**：`PreparedContext` 封装执行前的上下文准备
-- **两种模式同一套质量标准**：上传模式走 Stage 5（`NarrativeValidator`），实时模式走 L1 硬门（`realtime_engine._check_scene_quality`）；说话人合法性、最小对话数、旁白完整度两侧同口径，别名说话人与情绪近义词先由 L2 就地修正，不占用重试预算
-- **内容安全三层拦截**：`content_guard.py` 在入口拦截（HTTP 400 + 分类名）、在生图提示词上做视觉软化、并把服务商审核报错翻译成中文提示
+## 架构原则
+
+- **Harness 是薄编排器**：`quillforge/core.py` 只组装组件、驱动阶段、重试与通知，
+  不放业务逻辑。
+- **SUT 隔离**：LLM 客户端与 Prompt 渲染封装在 `NarrativeSUT`，可整体替换。
+- **可插拔 Stage**：所有阶段实现 `StageBase` 的 `name`、`stage_number`、`execute`。
+- **Observer 解耦**：日志、SSE、指标通过观察者接收事件。
+- **三层 Fallback**：流水线重试、简化 Prompt、无 LLM 硬编码保底。
+- **两种模式同一质量口径**：上传模式走 Stage 5，实时模式走
+  `realtime_engine._check_scene_quality`；说话人合法性、最小对话数、旁白完整度
+  使用同一标准。
+- **内容安全三层**：入口拦截、生图提示词软化、服务商审核报错翻译，均在
+  `content_guard.py`。
+
+## 项目挂载
+
+引擎核心通过 `registry.py` 接收外部项目，不反向导入 harness：
+
+| 注册点 | 说明 |
+| --- | --- |
+| `register_project` | 项目元信息、首页、受保护示例剧本 |
+| `register_router` | 追加 FastAPI 路由 |
+| `register_page` | 追加 HTML 页面 |
+| `register_static_dir` | 挂载静态目录，可作静态站点 |
+| `register_card` | 引擎首页的项目卡片与入口脚本 |
+| `register_page_assets` | 给引擎页面注入样式与脚本 |
+| `register_interlude` | 会话中断态与 `start/resolve/cancel` 委托 |
+| `register_process` | 子进程启停与状态探测 |
+
+`QUILLFORGE_PROJECTS` 是逗号分隔的模块名。未设置时注册表为空，引擎行为与上游
+`675c63a` 一致；单个模块导入失败只记录错误并降级启动。修改这里时保持“注册阶段
+只收集，不产生副作用”。
+
+引擎侧的通用接入能力还有：
+
+- `runtime_paths.py`：`QUILLFORGE_VAR_DIR`，必须绝对路径。
+- `script_registry.py`：生成剧本的可信边界、审阅与先审阅后开局。
+- `session_manager.py`：TTLCache、`INTERLUDE` 状态、中断态委托。
+- `provider_key.py`：透传 `X-Provider-Key`，`/api/settings/provider-key` 脱敏回读。
+- `StaticDirSpec` 与 `serve_page_file`：项目页面与静态目录。
+- 锚点一致性：`generic_adapter` 提取场景原文、全局设定、允许实体；
+  `extra_context` 渲染进 `system_prompt_v2`；Stage 5 追加第 9 项
+  `check_script_entity_fidelity`，`high` 级别，失败会阻断并触发重试。
 
 ## 目录职责
 
-```
-quillforge/
+```text
+engine/quillforge/
 ├── src/
-│   ├── quillforge/          # 核心引擎（Harness 架构）
-│   │   ├── core.py          # Harness 编排器（薄编排，不含业务逻辑）
-│   │   ├── sut.py           # System Under Test（LLM + Prompt 渲染隔离层）
-│   │   ├── observer.py      # Observer 模式（Logging/SSE/Metrics 观察者）
-│   │   ├── fallback.py      # 三层 Fallback 保底策略
-│   │   ├── fixtures.py      # Fixture 系统（PreparedContext 准备）
-│   │   └── stages/          # 五阶段 Pipeline 实现
-│   │       ├── base.py      # StageBase 抽象基类
-│   │       ├── context_assembly.py  # Stage 1
-│   │       ├── narrative.py         # Stage 2
-│   │       ├── dialogue.py          # Stage 3
-│   │       ├── choices.py           # Stage 4
-│   │       └── validation.py        # Stage 5
-│   │
-│   ├── routes/              # API 层（FastAPI 路由，按功能域拆分）
-│   │   ├── pages.py         # 前端页面服务
-│   │   ├── story.py         # 剧本交互（生成/选择/状态机）
-│   │   ├── upload.py        # 剧本文件上传
-│   │   ├── auto_run.py      # 自动运行
-│   │   ├── session.py       # 会话管理
-│   │   ├── realtime.py      # 实时生成模式
-│   │   ├── script_gen.py    # 剧本生成
-│   │   └── assets.py        # 静态资源（图片/音频）
-│   │
-│   ├── adapter/             # 适配器层（剧本解析与数据归一化）
-│   │   ├── parser.py        # GenericScriptAdapter（YAML 剧本解析核心）
-│   │   ├── normalizer.py    # 角色字段归一化（fill_character_gaps）
-│   │   └── loader.py        # 剧本加载（load_story/build_worldline/build_scene_text）
-│   │
-│   ├── server.py            # FastAPI 应用入口（中间件、路由注册）
-│   ├── schemas.py           # 数据模型（dataclass 定义所有 I/O 结构）
-│   ├── llm_client.py        # 统一 LLM 客户端（OpenAI 兼容格式）
-│   ├── config_manager.py    # 配置管理（环境变量 + YAML）
-│   ├── validator.py         # 叙事验证器（NarrativeValidator）
-│   ├── content_guard.py     # 内容安全（入口拦截 / 生图提示词软化 / 审核报错翻译）
-│   ├── extra_context.py     # 额外上下文（ExtraContext 类型安全封装）
-│   ├── image_gen.py         # 图片生成（立绘/背景）
-│   ├── tts_gen.py           # TTS 语音合成
-│   ├── realtime_engine.py   # AI 实时生成引擎
-│   ├── session_manager.py   # 会话状态管理
-│   ├── formatters.py        # 输出格式化
-│   └── logger.py            # 日志工具
-│
-├── config/                  # 配置文件
-│   ├── quillforge_config.yaml   # 运行参数（LLM/阶段/验证阈值）
-│   ├── character_card_template.yaml
-│   └── worldline_template.yaml
-│
-├── prompts/                 # Prompt 模板（Mustache 风格）
-│   ├── system_prompt_v2.md
-│   ├── narration_v2.md
-│   ├── dialogue_v2.md
-│   ├── choices_v2.md
-│   └── personality_judge.md  # Stage 5 性格评审（LLM-as-judge）
-│
-└── tests/                   # 测试
+│   ├── quillforge/             Harness 核心
+│   │   ├── core.py             编排、重试、feedback 回灌
+│   │   ├── sut.py              LLM + Prompt 渲染
+│   │   ├── observer.py         Logging / SSE / Metrics
+│   │   ├── fallback.py         三层保底
+│   │   ├── fixtures.py         PreparedContext
+│   │   └── stages/             五个阶段
+│   ├── routes/                 pages / story / session / realtime / script_gen /
+│   │                           auto_run / upload / assets / settings
+│   ├── adapter/                parser / normalizer / loader
+│   ├── server.py               FastAPI 入口、中间件、注册表消费
+│   ├── registry.py             项目挂载
+│   ├── runtime_paths.py        运行期目录
+│   ├── script_registry.py      生成剧本可信边界
+│   ├── session_manager.py      会话与中断态
+│   ├── schemas.py              dataclass I/O
+│   ├── llm_client.py           统一 LLM 客户端
+│   ├── config_manager.py       环境变量 + YAML
+│   ├── validator.py            9 项校验（8 项基础 + 实体保真）
+│   ├── content_guard.py        内容安全
+│   ├── extra_context.py        额外上下文
+│   ├── image_gen.py            生图与并发
+│   ├── tts_gen.py              TTS
+│   ├── realtime_engine.py      实时生成
+│   ├── script_generator.py     AI 剧本生成
+│   ├── provider_key.py         Key 透传中间件
+│   └── logger.py               日志
+├── prompts/                    6 份 Mustache 模板
+├── config/                     Harness、角色卡、世界线、示例场景
+├── samples/                    回响-DEMO、索尔维0801
+├── tests/                      367 项 pytest
+├── quillforge.md               上游完整技术规格
+├── server_start.py             交互式启动器
+├── ../README.md                引擎使用说明
+└── ../AGENTS.md                本文件
 ```
-
-## 技术栈
-
-- **Web 框架**: FastAPI + uvicorn
-- **LLM 客户端**: openai SDK（兼容 DeepSeek/Azure/Ollama/vLLM 等 OpenAI API 格式）
-- **数据模型**: dataclasses + Pydantic
-- **配置**: PyYAML + python-dotenv
-- **限流**: slowapi
-- **图片**: rembg（背景移除）+ OpenAI Images API
 
 ## 编码约定
 
-1. **文件头**：`# -*- coding: utf-8 -*-` + 模块级 docstring 说明职责
-2. **导入**：`from __future__ import annotations` 置于顶部
-3. **日志**：通过 `from logger import get_logger` 获取，名称格式 `"module.submodule"`
-4. **类型标注**：所有公共方法必须有完整类型标注
-5. **数据模型**：使用 `@dataclass`，定义在 `schemas.py`
-6. **接口抽象**：使用 `ABC` + `@abstractmethod`（如 `StageBase`、`HarnessObserver`）
-7. **分节注释**：使用 `═══` 分隔符划分代码区块
-8. **Prompt 模板**：Mustache 风格 `{{variable}}`、`{{#if}}`、`{{#each}}`
-9. **配置访问**：通过 `config_manager.get_settings()` 或 `load_config()` 获取
-10. **路径处理**：使用 `pathlib.Path`，不用字符串拼接
+1. 文件头使用 `# -*- coding: utf-8 -*-` 与模块级 docstring。
+2. 顶部保留 `from __future__ import annotations`。
+3. 日志通过 `from logger import get_logger`，名称用 `"module.submodule"`。
+4. 公共方法写完整类型标注；数据模型定义在 `schemas.py`。
+5. 抽象接口用 `ABC` + `@abstractmethod`。
+6. Prompt 使用 Mustache 风格 `{{variable}}`、`{{#if}}`、`{{#each}}`。
+7. 路径使用 `pathlib.Path`，配置通过 `config_manager`。
+8. 不新增硬编码的项目判断；项目差异应通过注册表与配置注入。
 
 ## 变更约束
 
-- **不得在 Harness 编排器（core.py）中添加业务逻辑**，业务逻辑属于 Stage 或 SUT
-- **不得绕过 SUT 直接调用 LLM**，所有 LLM 调用必须经过 `NarrativeSUT` 或 `LLMClient`
-- **新增 Stage 必须继承 `StageBase`**，实现 `name`、`stage_number`、`execute()` 三个抽象成员
-- **路由层（routes/）不得包含生成逻辑**，只做请求解析、调用引擎、格式化响应
-- **适配器层（adapter/）不得调用 LLM**，只做数据解析和归一化
-- **schemas.py 中的 dataclass 变更需保持向后兼容**（新增字段必须有默认值）
-- **配置文件变更需同步更新 `config/quillforge_config.yaml`**
-- **Prompt 模板变更需验证渲染结果**，模板变量名与 `ExtraContext` / `_common_variables()` 对齐
+- 不得在 `core.py` 加入业务逻辑，业务逻辑属于 Stage 或 SUT。
+- 不得绕过 SUT 直接调用 LLM；所有客户端统一经 `LLMClient`。
+- 不得让路由层包含生成逻辑，路由只解析请求、调用引擎、格式化响应。
+- 不得让适配器调用 LLM，它只解析与归一化。
+- 修改 `schemas.py` 时新增字段必须有默认值，保持向后兼容。
+- Prompt 变量变更必须与 `ExtraContext` / `_common_variables()` 对齐，并验证渲染。
+- 新增 Stage 必须实现 `StageBase`；新增项目必须实现 `register(registry)`。
+- 引擎不得导入 `harness.*`；导入方向只能 harness → engine。
 
-## 运行
+## 运行与配置
+
+在仓库根推荐：
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动服务（默认端口 8050）
-python server_start.py
-# 或
-python src/server.py --host 127.0.0.1 --port 8050
-
-# 运行全量测试
-pytest
-
-# 运行单个测试模块
-pytest quillforge/tests/test_validator.py
-
-# 运行单个测试函数
-pytest quillforge/tests/test_validator.py::test_function_name -v
+sh scripts/engine.sh    # 独立引擎，QUILLFORGE_PROJECTS 置空
+sh scripts/fusion.sh    # 融合，挂载 harness.projects.echo
 ```
 
-必需环境变量（`.env` 文件）：
-- `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY` + `DEEPSEEK_BASE_URL` + `DEEPSEEK_MODEL`
-- `IMAGE_API_KEY` / `IMAGE_BASE_URL` / `IMAGE_MODEL`（生图功能）
+直接运行：
+
+```bash
+cd engine/quillforge
+QUILLFORGE_PROJECTS= PYTHONPATH=src ../../.venv/bin/python src/server.py --host 127.0.0.1 --port 8050
+```
+
+配置优先级：环境变量 > `engine/.env` > 默认值。融合模式由根 `.env` 经编排脚本
+导出为环境变量，因此不需要在 `engine/` 再放一份 Key。模板在
+[../.env.example](../.env.example)。
+
+## 测试
+
+```bash
+cd engine
+../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 367
+```
+
+`live` 标记的测试需要真实大模型，默认排除。改动引擎或接入层后，再跑仓库根的
+`sh scripts/test-all.sh` 与 `node scripts/integration-smoke.mjs`。
+
+## Stage 5 校验
+
+`NarrativeValidator.validate_all()` 执行 8 项基础检查，Stage 5 再追加实体保真检查：
+
+| 检查项 | 级别 | 常见失败 |
+| --- | --- | --- |
+| `schema_compliance` | critical | 旁白过短、对话缺 speaker/text、选项缺字段 |
+| `dialogue_count` | high | 对话不在 `[min, max]`，默认 3-15 |
+| `character_consistency` | critical | 说话人不在角色卡集合 |
+| `consecutive_speaker` | medium | 同一角色连续发言 ≥ 3 轮 |
+| `personality_match` | high | 性格词表得分低；零命中时追加 LLM 评审 |
+| `worldline_adherence` | high | 未命中当前或下一世界线节点关键词 |
+| `choice_diversity` | medium | 选项高度雷同或 impact 单一 |
+| `choice_validity` | high | impact 不在合法集合 |
+| `script_entity_fidelity` | high | 生成内容出现剧本外的人、地、事、物 |
+
+失败项会写入日志 `[FAIL] 验证未通过: [...]`。实体保真未注入清单时会跳过，不误伤
+无剧本场景。
 
 ## 故障排除
 
-### 实时引擎并发竞态
+### 实时引擎并发
 
-| 症状 | 原因 | 解决方案 |
-|------|------|----------|
-| 后台预生成场景与主线程数据不一致 | `_start_pre_generation` 中 `self.scenes`/`self.history` 被主线程并发修改 | 确保使用 `copy.deepcopy` 快照（已实现），检查是否有新增字段未纳入快照 |
-| TTS/图片 SSE 事件乱序或丢失 | `queue.Queue` 生产-消费模型中，后台线程异常未捕获 | 检查 `_tts_task`/`_bg_task` 的 try-except 是否覆盖所有异常路径 |
-| 会话过期后线程池未释放 | `TTLCache` 淘汰时 `__delitem__` 未正确关闭 executor | 确认 `_RealtimeSessionCache.__delitem__` 调用了 `session.close()` |
-| 多个 SSE 客户端同时写入同一 session | 实时路由未对 session 加互斥锁 | 避免同一 session_id 并发请求；必要时在路由层加 `threading.Lock` |
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| 预生成场景与主线程数据不一致 | `self.scenes` / `self.history` 被并发修改 | 使用 `copy.deepcopy` 快照，检查新增字段是否纳入 |
+| TTS / 图片 SSE 乱序或丢失 | 后台线程异常未捕获 | 检查 `_tts_task` / `_bg_task` 的异常路径 |
+| 会话过期后线程池未释放 | TTLCache 淘汰未关闭 executor | 确认 `__delitem__` 调用 `session.close()` |
+| 同一 session 多个 SSE 客户端 | 路由层无互斥 | 避免同 session 并发请求，必要时加锁 |
 
-### LLM 调用超时与 Fallback 触发
+### LLM 调用与 Fallback
 
-| 症状 | 原因 | 解决方案 |
-|------|------|----------|
-| `ReadTimeout` / `ConnectTimeout` 异常 | 网络波动或 LLM 服务过载；默认超时 90s（Harness）/ 180s（实时） | 检查 `.env` 中 `DEEPSEEK_BASE_URL` 可达性；适当调大 `config/quillforge_config.yaml` 中 `llm.timeout` |
-| JSON 解析失败触发重试 | LLM 输出含 markdown 代码块或截断（max_tokens 不足） | 确认 `max_tokens` 配置充足（当前 Harness 3000/实时 6000）；检查是否禁用了 thinking（`extra_body={"thinking": {"type": "disabled"}}`） |
-| 三层 Fallback 全部触发（日志出现 `[FALLBACK] 硬编码保底`） | Stage 3 对话生成连续失败或返回数量不足 `dialogue_count_min` | 检查 LLM API Key 余额；查看 `fallback.py` 日志确认是 LLM 异常还是解析失败 |
-| 重试循环耗尽仍未通过验证 | Prompt 模板变量缺失导致 LLM 输出偏离 | 核对 `ExtraContext` 字段是否完整传入；检查 `prompts/` 模板中 `{{variable}}` 与 `_common_variables()` 对齐 |
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| `ReadTimeout` / `ConnectTimeout` | 网络或服务过载 | 检查 `DEEPSEEK_BASE_URL`，调整 `llm.timeout` |
+| JSON 解析失败触发重试 | 输出含 markdown 或截断 | 检查 `max_tokens`；确认 thinking 已关闭 |
+| 日志 `[FALLBACK] 硬编码保底` | Stage 3 连续失败或对话不足 | 查 Key、余额与 `dialogue_count_min` |
+| 重试耗尽仍不通过 | Prompt 变量缺失导致偏离 | 核对 `ExtraContext` 与模板变量 |
+| 主模型失败但未切换 | 账号级错误不触发备选链 | 401/402/403 按设计不切换，检查 Key 与余额 |
 
-### .env 缺失或配置错误
+### 配置与素材
 
-| 症状 | 原因 | 解决方案 |
-|------|------|----------|
-| 启动报 `sk-placeholder` 相关 401 错误 | 未配置 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` | 在项目根目录 `.env` 中填写有效 API Key |
-| 图片生成功能静默跳过（无报错但无图片） | `IMAGE_API_KEY` / `IMAGE_BASE_URL` / `IMAGE_MODEL` 缺失 | 补全 `.env` 中图片生成三件套；`ImageGenerator.enabled` 依赖三者同时存在 |
-| TTS 不生效 | `TTS_API_KEY` / `TTS_BASE_URL` 未配置 | 补全 TTS 相关环境变量；`TTSGenerator.enabled` 为 False 时所有 TTS 调用返回空 |
-| 配置优先级混乱（环境变量 vs YAML） | `config_manager.py` 优先级为：环境变量 > `.env` > 默认值 | 检查是否有系统环境变量覆盖了 `.env` 中的值 |
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| 启动后 401 | 未配置 Key 或仍是占位值 | 检查根 `.env` 或 `engine/.env` |
+| 无图片但不报错 | 图片三件套缺失 | 配齐 `IMAGE_API_KEY` / `IMAGE_BASE_URL` / `IMAGE_MODEL` |
+| 单张生图超过 70 秒 | 千问 prompt_extend 未关闭 | 保持默认关闭，或显式设 `IMAGE_PROMPT_EXTEND=false` |
+| TTS 不生效 | TTS 配置缺失 | 检查 `TTSGenerator.enabled` |
+| 配置被覆盖 | 系统环境变量优先于 `.env` | 检查当前 shell 的环境变量 |
 
-### Stage 5 验证拒绝常见原因
+### 接入相关
 
-Stage 5 (`ValidationStage`) 通过 `NarrativeValidator.validate_all()` 执行 8 项检查，`critical` 或 `high` 级别失败即判定不通过：
-
-| 检查项 | 级别 | 常见拒绝原因 |
-|--------|------|-------------|
-| `schema_compliance` | critical | 旁白 < 10 字；对话缺少 speaker/text；选项缺少 text/effect |
-| `dialogue_count` | high | 对话轮数不在 `[min, max]` 范围内（默认 3-15） |
-| `character_consistency` | critical | 对话 speaker 不在角色卡名称集合中（LLM 幻觉出不存在的角色） |
-| `consecutive_speaker` | medium | 同一角色连续发言 ≥ 3 轮（不阻塞，但影响质量评分） |
-| `personality_match` | high | 对话与角色性格描述偏离（启发式得分 < 0.5）；词表零命中时改用 `prompts/personality_judge.md` 的 LLM 评审得分，避免词表漏判被静默放过 |
-| `worldline_adherence` | high | 生成内容未命中当前/下一世界线节点关键词（偏离主线） |
-| `choice_diversity` | medium | 选项文本高度雷同或 impact 类型单一 |
-| `choice_validity` | high | 选项 impact 不在合法集合 `{advance, advance_risky, stay_current, side_branch}` 中 |
-
-**排查步骤**：查看日志中 `[FAIL] 验证未通过: [...]` 列出的失败项名称，对照上表定位原因。若频繁触发 `worldline_adherence`，检查 `世界书.md` 和 `主线剧情.yaml` 中节点名称是否过于抽象。若频繁触发 `personality_match` 且日志显示「LLM 评审得分」，说明角色卡 `personality` 描述与实际台词长期不符。
-
-### 实时模式质量硬门与内容安全
-
-| 症状 | 原因 | 解决方案 |
-|------|------|----------|
-| 日志 `[realtime] 场景N 质量未通过: ...` | L1 硬门命中：幻觉说话人 / 对话少于 8 条 / 旁白缺失 | 预生成路径会自动带失败原因重试一次（多一次 LLM 调用）；流式路径只记录 `scene["quality"]`，因为已推送的对话无法撤回 |
-| 反馈反复注入同一批问题 | `_quality_feedback` 未在通过时清空 | 核对 `_apply_quality_gate` 的 else 分支；反馈仅影响下一场景 Prompt |
-| 前端收到 HTTP 400「您输入的描述包含不支持的内容（…）」 | `content_guard.scan_input` 在路由层拦截涉黄/自残/毒品/武器/现实暴力描述 | 属预期行为；调整用户描述即可。分类词表在 `content_guard.BLOCK_RULES`，采用共现命中以避免误伤「命案/凶手/遗书」等叙事常用词 |
-| 生图返回占位图且日志「提示词被内容审核拦截」 | 服务商内容审核 400（如智谱 1301） | `moderation_error_or_none` 已把它转成 `ContentSafetyError` 并跳过无意义重试；如需放行该类画面，改 `content_guard.SOFTEN_RULES` |
-
----
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| 引擎日志 `项目模块 ... 接入失败` | `QUILLFORGE_PROJECTS` 模块不可导入 | 确认仓库根在 `PYTHONPATH`，模块暴露 `register(registry)` |
+| ECHO `state=failed` | pnpm 缺失或依赖未安装 | 在 `projects/echo` 执行 `pnpm install`，看 `.run/echo.log` |
+| 端点数量与文档不一致 | 挂载项目追加了路由 | 以运行实例 `/openapi.json` 为准，不用 `app.routes` 计数 |
+| 剧本生成后前端一直「未完成」 | `script_id` 不是 32 位十六进制 | 使用 `uuid4().hex`，不要截断 |
 
 ## 维护元数据
 
-```
+```text
 @maintainer: QuillForge Team
-@last_reviewed: 2026-08-06
-@version: 1.2.0
+@last_reviewed: 2026-11-16
+@version: 2.0.0
 ```

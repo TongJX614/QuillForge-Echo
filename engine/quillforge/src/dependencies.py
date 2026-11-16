@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
 from cachetools import TTLCache
 
@@ -146,32 +145,45 @@ start_receipts: dict[str, StartReceipt] = {}
 start_receipt_lock = threading.RLock()
 
 # ── 单例 ──
-_harness: Optional[Harness] = None
+_harnesses: dict[str, Harness] = {}
 _harness_lock = threading.Lock()
-_image_generator: Optional[ImageGenerator] = None
-_tts_generator: Optional[TTSGenerator] = None
+_image_generators: dict[str, ImageGenerator] = {}
+_tts_generators: dict[str, TTSGenerator] = {}
 
 
-def get_harness() -> Harness:
-    global _harness
-    if _harness is None:
-        with _harness_lock:
-            if _harness is None:
-                _harness = create_default_harness()
-    return _harness
+def get_harness(api_key: str | None = None) -> Harness:
+    """Harness 按服务商 Key 缓存：SUT 里的 LLM 客户端在构造时绑定 Key，
+    若全局只建一次，后填的前端 Key 不会生效。"""
+    from provider_key import current_provider_key
+    key = api_key if api_key is not None else current_provider_key()
+    with _harness_lock:
+        h = _harnesses.get(key)
+        if h is None:
+            h = create_default_harness()
+            _harnesses[key] = h
+        return h
 
 
-def get_image_generator() -> ImageGenerator:
-    """生图器单例（未配置 IMAGE_API_KEY 时 enabled=False，调用方回退占位图）"""
-    global _image_generator
-    if _image_generator is None:
-        _image_generator = ImageGenerator()
-    return _image_generator
+def get_image_generator(api_key: str | None = None) -> ImageGenerator:
+    """生图器按服务商 Key 缓存（前端设置页每浏览器自己的 Key）。
+    未显式传 Key 时取当前请求头里的 Key；都没有则用 .env 配置（enabled=False 时调用方回退占位图）。"""
+    from provider_key import current_provider_key
+    key = api_key if api_key is not None else current_provider_key()
+    with _harness_lock:
+        gen = _image_generators.get(key)
+        if gen is None:
+            gen = ImageGenerator(api_key=key or None)
+            _image_generators[key] = gen
+        return gen
 
 
-def get_tts_generator() -> TTSGenerator:
-    """TTS 语音合成器单例（未配置 TTS_API_KEY 时 enabled=False，回退纯文字模式）"""
-    global _tts_generator
-    if _tts_generator is None:
-        _tts_generator = TTSGenerator()
-    return _tts_generator
+def get_tts_generator(api_key: str | None = None) -> TTSGenerator:
+    """TTS 语音合成器按服务商 Key 缓存（未配置 Key 时 enabled=False，回退纯文字模式）"""
+    from provider_key import current_provider_key
+    key = api_key if api_key is not None else current_provider_key()
+    with _harness_lock:
+        gen = _tts_generators.get(key)
+        if gen is None:
+            gen = TTSGenerator(api_key=key or None)
+            _tts_generators[key] = gen
+        return gen

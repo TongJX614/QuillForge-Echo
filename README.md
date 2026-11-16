@@ -1,106 +1,158 @@
-# Quillforge-Echo
+# QuillForge × ECHO
 
-QuillForge 作为可驱动不同项目的叙事 harness 引擎，ECHO 作为被驱动的项目试例。
-两个项目各自都能独立运行；接入之后由引擎承担任务发布、角色对话生成、剧本
-生成与校验，ECHO 继续持有场景、任务、Flags 与存档的事实源。
+一套可独立运行、也可组合成完整链路的互动叙事项目。
 
-## 目录
+**ECHO** 是面向玩家的像素 RPG：场景探索、任务推进、NPC 对白、背包、Flags 与存档都在这里发生。
+**QuillForge** 是面向创作者的叙事引擎：读取世界书、角色和节拍，生成对白、任务、剧本、场景图与语音。
+**接入层**负责把两边接起来，让引擎生成的内容进入 ECHO，同时不夺走 ECHO 对运行态的所有权。
+
+![ECHO 标题页](docs/assets/screenshots/title.jpg)
+
+## 项目定位
+
+这不是一个把大模型塞进对话框的演示，而是一套把生成式叙事约束在可玩结构里的工程实现：
+
+- **生成归引擎**：五阶段流水线、剧本生成、实时生成、生图、TTS、内容安全与剧本锚点校验。
+- **运行归 ECHO**：场景、任务、道具、Flags、存档与结局判定始终由游戏侧持有。
+- **项目可插拔**：引擎核心不认识 ECHO。新增项目只需增加一个接入模块，在 `QUILLFORGE_PROJECTS` 中登记。
+- **没有引擎也能玩**：手工制作的索尔维 1927 路线不依赖大模型；生成式入口在引擎缺席时会明确降级。
+
+## 三条体验动线
+
+### 索尔维 1927：手工考据的历史现场
+
+以 1927 年索尔维会议为舞台，人物、争论与科学细节经过人工整理。玩家通过探索、收集与对话推进，在会议现场面对爱因斯坦、玻尔、居里夫人、洛伦兹等人。
+
+![索尔维入场](docs/assets/screenshots/solvay-intro.jpg)
+
+### 世界编织：从一句话到可玩世界
+
+在 VR 实验室找到研究员，选择「世界编织」，进入引擎的世界书生成与审阅流程。确认主题、角色与真实世界书节选后，才进入生成的 GALGAME。生成失败或引擎未接入时，入口会明确提示，不会静默卡住。
+
+![引擎创作台](docs/assets/screenshots/engine-home.jpg)
+
+### 框架世界：记忆修复主线
+
+从苏然的办公室开始，和林晓一起追查匿名委托，经过天文实验室、ARPES 实验室与 VR 实验室，最终进入记忆回溯。任务链、道具与对白共同推进，选择会影响属性与后续分支。
+
+## 游戏截图
+
+| 探索 | 对白 |
+| --- | --- |
+| ![办公室场景](docs/assets/screenshots/office.jpg) | ![林晓对白](docs/assets/screenshots/dialogue-lin-xiao.jpg) |
+| 像素场景、任务追踪与交互提示 | 立绘、打字机文本与生成式对白 |
+
+| 索尔维会议现场 | 洛伦兹对白 |
+| --- | --- |
+| ![索尔维会场](docs/assets/screenshots/solvay-hall.jpg) | ![洛伦兹对白](docs/assets/screenshots/dialogue-lorentz.jpg) |
+| 1927 年会议大厅与可交互人物 | 手绘立绘与固定剧情演出 |
+
+| VR 实验室 | 标题页 |
+| --- | --- |
+| ![VR 实验室](docs/assets/screenshots/vr-lab.jpg) | ![标题页](docs/assets/screenshots/title.jpg) |
+| 记忆织机与两条体验入口 | 视频背景、故障字效与存档入口 |
+
+## 功能
+
+**ECHO**
+
+- 标题页、继续游戏、自动存档与三个手动存档位。
+- 像素地图探索、点击寻路、NPC 与道具交互、场景传送。
+- 任务链、步骤追踪、背包、战术终端与系统菜单。
+- Galgame 式对白：立绘、说话人、表情、历史记录、自动播放。
+- 索尔维 1927 手工路线，含入场视频、CG、言弹辩论与多结局。
+- 世界编织入口：游戏内 iframe 打开引擎创作台，审阅世界书后再开局。
+- 剧情小游戏与辩论玩法，由接入层通过会话中断态挂载。
+
+**QuillForge**
+
+- 上传剧本模式：上下文组装 → 叙事锚定 → 对话生成 → 选择分支 → 验证门。
+- 一句话生成完整剧本包，生成结果先审阅、后开局。
+- 实时生成模式：描述 → 世界书 → 场景 → 对白 → 选择 → 结局。
+- 角色立绘、场景背景、TTS、内容安全与备选模型链。
+- 剧本原文锚点与实体保真校验，防止生成内容脱离世界书。
+- 首页、Galgame 播放器、世界编织视图、API 文档与项目卡片。
+
+## 架构
+
+```mermaid
+flowchart LR
+  Player[玩家浏览器] --> Echo[ECHO 像素 RPG]
+  Echo -->|任务 / 对白 / 结局请求| Harness[接入层]
+  Harness --> Engine[QuillForge 引擎]
+  Engine -->|生成结果与校验| Harness
+  Harness -->|候选内容| Echo
+  Echo -->|唯一事实源| State[场景 / 任务 / Flags / 存档]
+  Engine -->|世界书 / 剧本 / 生图 / TTS| Console[创作台]
+```
 
 | 路径 | 角色 |
 | --- | --- |
-| `engine/` | QuillForge 引擎，取自上游 `675c63a`。只增加了通用扩展点，不含任何 ECHO 逻辑 |
-| `harness/` | 项目接入层。`harness/projects/echo/` 是 ECHO 适配器，全部 ECHO 专有代码在此 |
-| `projects/echo/` | ECHO 像素 RPG，取自上游 `gewuzaojing-echo@main`，已摘除内嵌引擎并去除全部引擎命名 |
-| `scripts/` | 三种运行模式的编排脚本与跨模块冒烟 |
+| `engine/` | 叙事引擎。核心不含 ECHO 逻辑，只提供通用扩展点 |
+| `harness/` | 项目接入层。ECHO 的节拍、路由、小游戏与启动器都在这里 |
+| `projects/echo/` | ECHO 游戏本体、共享契约与内容资源 |
+| `scripts/` | 独立运行、融合运行、全量测试与跨模块冒烟 |
+| `var/` | 运行期生成物：上传、场景图、语音。不进入版本管理 |
+| `docs/` | 文档索引、截图与分享材料 |
 
-## 分工
+引擎与 ECHO 的导入方向是单向的：接入层可以导入引擎模块，引擎不得导入接入层。ECHO 不导入引擎模块，只通过 HTTP、iframe 与共享消息契约通信。
 
-引擎负责生成与校验：五阶段流水线（上下文组装 → 叙事锚定 → 对话生成 → 选择
-分支 → 验证门）、剧本生成、实时生成模式、生图、TTS、内容安全拦截、剧本原文
-锚点与实体保真校验。
+## 快速开始
 
-ECHO 负责运行与状态：场景与地图、任务发布与推进、NPC 对话呈现、Flags、背包、
-存档。引擎不直接改写 ECHO 的任何运行态，进度只通过请求/响应与对白树的 actions
-回写。
+准备两份配置，互不代管：
 
-接入层负责翻译：把 ECHO 的宿主节拍（`echo_beats.yaml`，2 个剧本包 / 26 个节拍）
-映射到引擎的生成能力，并把引擎地址在启动时注入给 ECHO。
-
-## 接入方式
-
-引擎核心不认识任何具体项目。项目模块实现 `register(registry)`，向注册表声明
-自己的路由、页面、静态目录、首页卡片、会话中断态与子进程启停钩子。启用方式
-是环境变量：
-
-```
-QUILLFORGE_PROJECTS=harness.projects.echo
+```bash
+cp .env.example .env
+cp projects/echo/.env.example projects/echo/.env
 ```
 
-不设置这个变量时注册表为空，引擎行为与上游完全一致。会话中断态是引擎提供的
-通用机制：引擎只出一个 `INTERLUDE` 状态和一块 per-session 暂存区，玩法的注入、
-生成、判定与结算都在项目侧实现。ECHO 的剧情小游戏就是这样挂上去的，对外
-`session_state` 仍报 `minigame`，前端契约不变。
+在根 `.env` 填入文本、生图与语音服务商的 Key；在 `projects/echo/.env` 填入 ECHO 自己的模型连接。只体验索尔维路线时，模型 Key 可以留空。
 
-接入第二个项目时不需要改引擎，新增一个 `harness/projects/<name>/` 并在
-`QUILLFORGE_PROJECTS` 里追加即可。
+三种运行方式：
 
-## 运行
-
-先准备两份配置，两边互不代管：
-
-```
-cp .env.example .env                        # 引擎与接入层
-cp projects/echo/.env.example projects/echo/.env   # ECHO 自身
+```bash
+sh scripts/engine.sh   # 只起引擎，http://127.0.0.1:8050/
+sh scripts/echo.sh     # 只起 ECHO，http://127.0.0.1:5000/
+sh scripts/fusion.sh   # 融合：引擎 8050，ECHO 5173
 ```
 
-三种模式：
+融合模式下，引擎启动后会拉起 ECHO，并通过环境变量注入引擎地址。ECHO 不知道引擎的具体实现，也不写死任何引擎路径。
 
-```
-sh scripts/engine.sh     # 只起引擎，不接入任何项目    http://127.0.0.1:8050/
-sh scripts/echo.sh       # 只起 ECHO，不接引擎          http://127.0.0.1:5000/
-sh scripts/fusion.sh     # 融合：引擎驱动 ECHO          引擎 8050 / ECHO 5173
-```
+依赖：
 
-融合模式下引擎起来后由接入层在后台拉起 ECHO，并把引擎地址通过
-`NARRATIVE_ENGINE_URL/HOST/PORT` 注入给它。ECHO 自己不写死任何引擎位置；没有
-注入时世界编织入口会明确提示引擎未接入，手工制作的索尔维 1927 路线照常可玩。
-
-依赖：引擎需要 Python 3.11 与 `engine/requirements.txt`；ECHO 需要 Node.js 24
-与 pnpm 9+。
+- 引擎：Python 3.11，`engine/requirements.txt`，仓库根 `.venv`。`rembg` 可选，缺失时角色立绘回退为纯色抠图。
+- ECHO：Node.js 24，`projects/echo/apps/echo/node_modules`。依赖安装使用 pnpm 9+。
 
 ## 验证
 
-```
-sh scripts/test-all.sh    # 一键跑全部
+```bash
+sh scripts/test-all.sh
 ```
 
-分段：
-
-| 套件 | 命令 | 数量 |
+| 套件 | 内容 | 数量 |
 | --- | --- | --- |
-| 引擎 | `cd engine && python -m pytest quillforge/tests -q -m "not live"` | 350 |
-| 接入层 | `python -m pytest harness/projects/echo/tests -q` | 86 |
-| 接入层 JS | `node --test harness/projects/echo/tests_js/*.cjs` | 18 |
-| ECHO 仓库级 | `cd projects/echo && node --test tests/*.test.mjs` | 9 |
-| ECHO app 级 | `cd projects/echo/apps/echo`，逐个 `node --import tsx scripts/test-*.ts` | 15 |
-| 跨模块冒烟 | `node scripts/integration-smoke.mjs` | 11 |
+| 引擎 pytest | 流水线、验证器、生图、TTS、注册表、路由 | 367 |
+| 接入层 pytest | 节拍、生成器、路由、启动器、上下文接地 | 90 |
+| 接入层 JS | 嵌入桥接、入口状态机、契约一致性 | 18 |
+| ECHO 仓库级 | 仓库结构、内容清单、公共文档 | 9 |
+| ECHO app 级 | 存档、任务、系统菜单、VR、对白接线 | 15 |
+| 跨模块冒烟 | 静态契约、引擎独立模式、融合模式 | 11 |
 
-引擎的 350 项里有 312 项是上游 `675c63a` 原有测试，数量与未改动的上游克隆一致，
-用来确认零回归。冒烟脚本分静态契约、引擎独立模式、融合模式三段，依赖缺失时明确
-报 SKIP 而不是假装通过。
+合计 499 项测试与 11 项冒烟检查。冒烟在依赖缺失时明确报 SKIP，不伪装通过。
 
-依赖：引擎需要 Python 3.11 与 `engine/requirements.txt`（`rembg` 可选，缺失时生图
-自动降级为占位图）；ECHO 的 app 级测试需要 `projects/echo/apps/echo/node_modules`
-里有 `tsx`。
+## 文档
 
-## 细节
+- [AGENTS.md](AGENTS.md)：给 AI / 新维护者的仓库工作指南，先读这一份。
+- [docs/README.md](docs/README.md)：文档索引与截图目录。
+- [scripts/README.md](scripts/README.md)：独立、融合运行与测试脚本。
+- [engine/README.md](engine/README.md)：引擎架构、运行参数与接口。
+- [engine/AGENTS.md](engine/AGENTS.md)：引擎内部约定、校验与故障排除。
+- [harness/README.md](harness/README.md)：接入层结构、挂载方式与边界。
+- [projects/echo/README.md](projects/echo/README.md)：ECHO 游戏侧说明。
+- [projects/echo/docs/](projects/echo/docs/)：产品体验、架构与本地开发。
 
-- 引擎架构与故障排除：[engine/AGENTS.md](engine/AGENTS.md)
-- 接入层实现说明：[harness/README.md](harness/README.md)
-- ECHO 侧文档：[projects/echo/README.md](projects/echo/README.md)
+## 来源与授权
 
-## 授权
+`engine/` 基于 QuillForge 上游 `675c63a`；`projects/echo/` 基于 gewuzaojing-echo 上游 `e1ce5b9`。融合部分由本仓库维护。
 
-引擎与 ECHO 的程序代码沿用各自上游许可。剧情、世界书、角色、美术与音频等
-内容采用 CC BY-NC-SA 4.0，边界见 [projects/echo/NOTICE.md](projects/echo/NOTICE.md)
-与 [projects/echo/content-manifest.json](projects/echo/content-manifest.json)。
+程序代码沿用各自上游许可。剧情、世界书、角色、美术、音频与视频等内容采用 CC BY-NC-SA 4.0，具体边界见 [projects/echo/NOTICE.md](projects/echo/NOTICE.md) 与 [projects/echo/content-manifest.json](projects/echo/content-manifest.json)。

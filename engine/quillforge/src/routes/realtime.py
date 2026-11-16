@@ -22,7 +22,7 @@ logger = get_logger("routes.realtime")
 router = APIRouter(tags=["realtime"])
 limiter = Limiter(key_func=get_remote_address)
 
-IMAGE_CONCURRENCY = int(os.getenv("IMAGE_CONCURRENCY", "7"))
+IMAGE_CONCURRENCY = int(os.getenv("IMAGE_CONCURRENCY", "8"))
 
 
 class RealtimeStartRequest(BaseModel):

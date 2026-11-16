@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-MiMo TTS 语音合成模块（OpenAI 兼容 chat.completions + audio 参数 + 磁盘缓存）
+通用 TTS 语音合成模块（磁盘缓存 + 无 key 回退）
 
-基于小米 MiMo-V2.5-TTS 系列模型，通过 tokendance.space 网关调用。
-支持两种模式：
-  1. 音色克隆（mimo-v2.5-tts-voiceclone）：传入参考音频样本，复刻任意音色。
-  2. 预置音色（mimo-v2.5-tts）：使用内置精品音色（冰糖/茉莉/苏打/白桦等）。
-  当角色有参考音频时自动用克隆模式，否则回退到预置音色。
+支持两种协议（TTS_PROTOCOL 选择）：
+  1. openai-chat（默认）：MiMo-V2.5-TTS 系列，chat.completions + audio 参数。
+     音色克隆（mimo-v2.5-tts-voiceclone）传入参考音频样本；预置音色（mimo-v2.5-tts）用内置精品音色。
+  2. dashscope：千问AI平台 SpeechSynthesizer 端点（Qwen-Audio-TTS / CosyVoice），
+     仅预置音色，一个 Key 与文本/生图共用同一平台。
+  当角色有参考音频且协议支持时自动用克隆模式，否则回退到预置音色。
 
 设计目标（和 image_gen.py 保持一致）：
 - 磁盘缓存：同一 (speaker + text) 只合成一次，重玩/重开同一剧本不重复花钱。
@@ -20,8 +21,11 @@ import logging
 import os
 import re
 import time
+import json
 import base64
 import hashlib
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -80,50 +84,67 @@ def _fix_voice_encoding(voice_id: str) -> str:
 class TTSGenerator:
     """MiMo TTS 客户端（带磁盘缓存与无 key 回退）"""
 
-    def __init__(self):
+    def __init__(self, api_key: str | None = None):
         _s = _get_settings_safe()
         self.api_key = (
-            _s.tts_api_key.strip() if _s
-            else os.environ.get("TTS_API_KEY", "").strip()
+            api_key.strip() if api_key else
+            (_s.tts_api_key.strip() if _s
+             else os.environ.get("TTS_API_KEY", "").strip())
         )
         base_url = (
             _s.tts_base_url.strip() if _s
             else os.environ.get("TTS_BASE_URL", "").strip()
         )
         self.base_url = base_url or None
-        # 主模型（音色克隆）
+        # 协议：openai-chat（MiMo chat.completions+audio）/ dashscope（千问平台 SpeechSynthesizer）
+        self.protocol = (
+            (getattr(_s, "tts_protocol", "") or os.environ.get("TTS_PROTOCOL", "openai-chat")).strip().lower()
+        )
+        # 默认模型与预置音色随协议不同（千问平台用 Qwen-Audio-TTS 音色列表，MiMo 用内置音色），
+        # 均可被环境变量/配置单独覆盖
+        if self.protocol == "dashscope":
+            def_model = "qwen-audio-3.1-tts-flash"
+            def_fallback = def_model
+            def_voice, def_male, def_female = "longanhuan_v3.1", "longanyang_v3.1", "longanhuan_v3.1"
+            def_male_age = ["longniuniu_v3.1", "longanyang_v3.1", "longsanshu_v3.1", "longshu_v3.1"]
+            def_female_age = ["longpaopao_v3.1", "xiaxiaochen_v3.1", "guyunshu_v3.1", "wenhuaizhi_v3.1"]
+        else:
+            def_model = "mimo-v2.5-tts-voiceclone"
+            def_fallback = "mimo-v2.5-tts"
+            def_voice, def_male, def_female = "mimo_default", "苏打", "冰糖"
+            def_male_age = ["Milo", "苏打", "Dean", "白桦"]
+            def_female_age = ["茉莉", "冰糖", "Mia", "Chloe"]
+        # 主模型（openai-chat 协议下为音色克隆模型）
         self.model = (
-            _s.tts_model.strip() if _s
-            else os.environ.get("TTS_MODEL", "mimo-v2.5-tts-voiceclone").strip()
+            (_s.tts_model.strip() if _s else os.environ.get("TTS_MODEL", "").strip())
+            or def_model
         )
         # 回退模型（预置音色，不需要参考音频）
         self.fallback_model = (
-            _s.tts_fallback_model.strip() if _s
-            else os.environ.get("TTS_FALLBACK_MODEL", "mimo-v2.5-tts").strip()
+            (_s.tts_fallback_model.strip() if _s else os.environ.get("TTS_FALLBACK_MODEL", "").strip())
+            or def_fallback
         )
         # 默认预置音色
         self.default_voice = (
-            _s.tts_default_voice.strip() if _s
-            else os.environ.get("TTS_DEFAULT_VOICE", "mimo_default").strip()
+            (_s.tts_default_voice.strip() if _s else os.environ.get("TTS_DEFAULT_VOICE", "").strip())
+            or def_voice
         )
         # 默认男声/女声预置音色（角色卡有 gender 字段时自动选择）
         self.default_voice_male = (
-            _s.tts_default_voice_male.strip() if _s
-            else os.environ.get("TTS_DEFAULT_VOICE_MALE", "苏打").strip()
+            (_s.tts_default_voice_male.strip() if _s else os.environ.get("TTS_DEFAULT_VOICE_MALE", "").strip())
+            or def_male
         )
         self.default_voice_female = (
-            _s.tts_default_voice_female.strip() if _s
-            else os.environ.get("TTS_DEFAULT_VOICE_FEMALE", "冰糖").strip()
+            (_s.tts_default_voice_female.strip() if _s else os.environ.get("TTS_DEFAULT_VOICE_FEMALE", "").strip())
+            or def_female
         )
         # 按年龄分段的预置音色映射（环境变量可覆盖）
         # 格式: voice1,voice2,...（按年龄段顺序：少年/青年/中年/老年）
         self.voice_male_by_age = self._load_age_voices(
-            _s, "tts_voice_male_by_age", "TTS_VOICE_MALE_BY_AGE",
-            ["Milo", "苏打", "Dean", "白桦"]
+            _s, "tts_voice_male_by_age", "TTS_VOICE_MALE_BY_AGE", def_male_age
         )
         self.voice_female_by_age = self._load_age_voices(
-            _s, "tts_voice_female_by_age", "TTS_VOICE_FEMALE_BY_AGE",
-            ["茉莉", "冰糖", "Mia", "Chloe"]
+            _s, "tts_voice_female_by_age", "TTS_VOICE_FEMALE_BY_AGE", def_female_age
         )
         # 年龄分段阈值
         self.age_thresholds = self._load_age_thresholds(_s)
@@ -479,6 +500,81 @@ class TTSGenerator:
 
     def _call_tts_api(self, text: str, voice_id: str) -> Optional[bytes]:
         """
+        合成语音，返回 WAV 音频二进制数据。按 TTS_PROTOCOL 分派协议。
+        """
+        # 尝试解析 voice_id 为参考音频文件路径
+        voice_sample_path = self._resolve_voice_sample(voice_id)
+        if self.protocol == "dashscope":
+            return self._call_dashscope_tts(text, voice_id, voice_sample_path)
+        return self._call_mimo_tts(text, voice_id, voice_sample_path)
+
+    def _call_dashscope_tts(self, text: str, voice_id: str, voice_sample_path: Optional[Path]) -> Optional[bytes]:
+        """
+        千问AI平台非实时语音合成（SpeechSynthesizer 端点，Qwen-Audio-TTS / CosyVoice）。
+        仅支持预置音色；响应返回音频 URL（24 小时有效），下载后返回 WAV 字节。
+        主模型不可用时按 TTS_FALLBACK_MODEL 切换（配置为空则只试主模型）。
+        """
+        if voice_sample_path:
+            logger.warning("[tts_api] dashscope 协议不支持参考音频克隆，回退预置音色")
+        voice = self.default_voice if (voice_sample_path or not voice_id) else voice_id
+        models = [self.model]
+        if self.fallback_model and self.fallback_model not in models:
+            models.append(self.fallback_model)
+        url = self.base_url.rstrip("/") + "/api/v1/services/audio/tts/SpeechSynthesizer"
+        last_err: Exception | None = None
+        for idx, model in enumerate(models):
+            body = {
+                "model": model,
+                "input": {
+                    "text": text,
+                    "voice": voice,
+                    "format": "wav",
+                    "sample_rate": 24000,
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                detail = ""
+                try:
+                    detail = e.read().decode("utf-8", "replace")[:200]
+                except Exception:
+                    pass
+                last_err = RuntimeError(f"{model}: HTTP {e.code} {detail}")
+                if e.code in (401, 402, 403):
+                    break
+                logger.warning("[tts_gen] 语音模型 %s 合成失败（HTTP %s），%s",
+                               model, e.code,
+                               "尝试备选" if idx + 1 < len(models) else "放弃")
+                continue
+            except Exception as e:
+                last_err = e
+                break
+
+            audio_url = ((payload.get("output") or {}).get("audio") or {}).get("url")
+            if not audio_url:
+                logger.warning("[tts_gen] 语音模型 %s 响应中无 output.audio.url: %s", model, payload)
+                last_err = RuntimeError(f"{model}: 响应无音频 URL")
+                continue
+            with urllib.request.urlopen(audio_url, timeout=60) as audio_resp:
+                return audio_resp.read()
+
+        if last_err is not None:
+            raise last_err
+        return None
+
+    def _call_mimo_tts(self, text: str, voice_id: str, voice_sample_path: Optional[Path]) -> Optional[bytes]:
+        """
         调用 MiMo TTS API 合成语音，返回 WAV 音频二进制数据。
 
         API 使用 OpenAI 兼容的 chat.completions.create() 端点：
@@ -491,8 +587,6 @@ class TTSGenerator:
         当角色有参考音频文件时使用 mimo-v2.5-tts-voiceclone（音色克隆），
         否则回退到 mimo-v2.5-tts（预置音色）。
         """
-        # 尝试解析 voice_id 为参考音频文件路径
-        voice_sample_path = self._resolve_voice_sample(voice_id)
 
         if voice_sample_path:
             # ─── 音色克隆模式 ───

@@ -311,6 +311,57 @@ def _build_worldline(pack_name: str, stage: str) -> str:
 # 场景上下文组装
 # ═══════════════════════════════════════════════════════
 
+_OBJECTIVE_LABELS = {
+    "collect": "收集", "submit": "提交", "deliver": "交付",
+    "talk_to_npc": "与NPC交谈", "talk": "交谈", "visit": "前往",
+    "use": "使用", "investigate": "调查", "reach": "抵达", "defeat": "击败",
+}
+
+
+def _world_lookup(world: dict) -> dict[str, str]:
+    names: dict[str, str] = {}
+    if not isinstance(world, dict):
+        return names
+    for bucket in ("items", "inventory"):
+        for item in world.get(bucket) or []:
+            if isinstance(item, dict) and item.get("id"):
+                names[str(item["id"])] = str(item.get("name") or item["id"])
+    return names
+
+
+def _format_objectives(objectives, names: dict[str, str]) -> str:
+    segs = []
+    for obj in objectives or []:
+        if not isinstance(obj, dict):
+            continue
+        raw_type = str(obj.get("type") or "")
+        raw_target = str(obj.get("target") or "")
+        label = _OBJECTIVE_LABELS.get(raw_type, raw_type or "目标")
+        target = names.get(raw_target, raw_target)
+        text = f"{label}:{target}"
+        try:
+            if int(obj.get("count") or 1) > 1:
+                text += f"×{obj.get('count')}"
+        except (TypeError, ValueError):
+            pass
+        segs.append(text)
+    return "、".join(segs)
+
+
+def _format_quest_detail(quest: dict, names: dict[str, str]) -> str:
+    title = str(quest.get("title") or quest.get("id") or "")
+    seg = f"- {title}"
+    idx = quest.get("stepIndex")
+    if isinstance(idx, int) and idx >= 0:
+        seg += f"（第{idx + 1}步）"
+    if quest.get("stepDesc"):
+        seg += f"｜当前步骤：{quest['stepDesc']}"
+    obj_text = _format_objectives(quest.get("objectives"), names)
+    if obj_text:
+        seg += f"｜目标：{obj_text}"
+    return seg
+
+
 def _format_echo_state(req: dict) -> str:
     parts = []
     stage = req.get("stage", "")
@@ -325,18 +376,21 @@ def _format_echo_state(req: dict) -> str:
         active, completed = quests, []
     else:
         active, completed = [], []
+    world = req.get("world") if isinstance(req.get("world"), dict) else {}
+    names = _world_lookup(world)
     if active:
-        titles = []
-        for q in active:
+        parts.append("【进行中的任务】")
+        for q in active[:8]:
             if isinstance(q, dict):
-                titles.append(str(q.get("title") or q.get("id") or ""))
+                parts.append(_format_quest_detail(q, names))
             elif isinstance(q, str):
-                titles.append(q)
-        joined = "；".join(t for t in titles if t)
-        if joined:
-            parts.append("进行中的任务：" + joined)
+                parts.append(f"- {q}")
     if completed:
-        parts.append("已完成的任务：" + "、".join(str(c) for c in completed[:12]))
+        titles = [str(c.get("title") or c.get("id") or "") if isinstance(c, dict) else str(c)
+                  for c in completed]
+        joined = "、".join(t for t in titles if t)
+        if joined:
+            parts.append("已完成的任务：" + joined)
     flags = [f for f in (req.get("flags", []) or [])
              if isinstance(f, str) and not f.startswith(("visited:", "talked:", "stage_", "echo_choice:"))]
     if flags:
@@ -377,6 +431,7 @@ def _format_world_state(world: dict) -> str:
     if not isinstance(world, dict) or not world:
         return ""
     lines = []
+    names = _world_lookup(world)
     scene = _format_world_scene(world)
     if scene:
         lines.append(scene)
@@ -388,13 +443,7 @@ def _format_world_state(world: dict) -> str:
     if quests:
         lines.append("【进行中的任务】")
         for q in quests[:8]:
-            seg = f"- {q.get('title') or q.get('id')}"
-            if q.get("stepDesc"):
-                seg += f"｜当前步骤：{q['stepDesc']}"
-            objs = [o for o in (q.get("objectives") or []) if isinstance(o, dict)]
-            if objs:
-                seg += "｜目标：" + "、".join(f"{o.get('type')}:{o.get('target')}" for o in objs)
-            lines.append(seg)
+            lines.append(_format_quest_detail(q, names))
     completed = [str(c) for c in (world.get("completedQuests") or [])]
     if completed:
         lines.append("已完成任务：" + "、".join(completed[:12]))
@@ -408,12 +457,159 @@ def _format_world_state(world: dict) -> str:
     hist = [h for h in (world.get("history") or []) if isinstance(h, dict) and h.get("text")]
     if hist:
         lines.append("【最近剧情】")
+        current_scene = str(world.get("sceneId") or "")
         for h in hist[-10:]:
-            lines.append(f"- {h.get('speaker', '')}：{str(h.get('text', '')).strip()[:120]}")
+            scene_id = str(h.get("sceneId") or "")
+            where = ""
+            if scene_id and scene_id != current_scene:
+                where = f"〔{ECHO_SCENE_NAMES.get(scene_id, scene_id)}〕"
+            lines.append(f"- {where}{h.get('speaker', '')}：{str(h.get('text', '')).strip()[:120]}")
     choices = [c for c in (world.get("choices") or []) if isinstance(c, str)]
     if choices:
         lines.append("玩家近期选择：" + " / ".join(choices[-6:]))
     return "\n".join(lines)
+
+
+def _worldbook_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """按 `## ` 标题拆分世界书，保留前言与每个章节的完整块。"""
+    parts = re.split(r"(?m)^(##\s+.+)$", str(text or ""))
+    preamble = parts[0].strip()
+    sections: list[tuple[str, str]] = []
+    for i in range(1, len(parts), 2):
+        title = parts[i].strip()
+        body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+        sections.append((title, f"{title}\n{body}".strip()))
+    return preamble, sections
+
+
+_WORLDBOOK_ALWAYS = ("故事边界", "情感基调")
+_WORLDBOOK_IGNORE_TERMS = {
+    "当前", "任务", "目标", "玩家", "角色", "场景", "进行中", "已完成",
+    "收集", "提交", "获得", "使用", "需要", "一个", "这个", "那个",
+    "以及", "然后", "可以", "时候", "自己", "他们", "我们",
+}
+
+
+def _worldbook_focus_terms(world: dict, stage: str = "", npc_name: str = "",
+                           extra=()) -> list[str]:
+    """从当前场景/任务/角色/持有物中提取世界书检索词，决定注入哪一段设定。"""
+    terms: set[str] = {str(t).strip() for t in extra if str(t).strip()}
+    if stage:
+        terms.add(ECHO_STAGE_NAMES.get(stage, stage))
+    if isinstance(world, dict) and world:
+        terms.add(str(world.get("sceneName") or ""))
+        for npc in world.get("npcs") or []:
+            if isinstance(npc, dict):
+                terms.add(str(npc.get("name") or ""))
+        names = _world_lookup(world)
+        terms.update(names.values())
+        for quest in world.get("quests") or []:
+            if not isinstance(quest, dict):
+                continue
+            terms.add(str(quest.get("title") or ""))
+            terms.add(str(quest.get("stepDesc") or ""))
+            for obj in quest.get("objectives") or []:
+                if isinstance(obj, dict):
+                    target = str(obj.get("target") or "")
+                    terms.add(names.get(target, target))
+        for flag in world.get("flags") or []:
+            if isinstance(flag, str) and flag.startswith("camp_"):
+                terms.add(_BRANCH_LABELS.get(flag, flag))
+    if npc_name:
+        terms.add(npc_name)
+    focus = []
+    for term in terms:
+        term = term.strip()
+        if len(term) < 2 or term in _WORLDBOOK_IGNORE_TERMS:
+            continue
+        if re.fullmatch(r"[0-9A-Za-z_:.\-]+", term) and len(term) < 4:
+            continue
+        focus.append(term)
+    return focus
+
+
+def _trim_worldbook_block(block: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    cut = block[:limit]
+    pos = cut.rfind("\n")
+    if pos > int(limit * 0.6):
+        cut = cut[:pos]
+    return cut.rstrip() + "…"
+
+
+def _select_worldbook(text: str, terms: list[str], limit: int) -> str:
+    """按检索词挑选世界书章节；故事边界/情感基调优先，避免固定截断丢掉约束。"""
+    text = str(text or "").strip()
+    if not text or limit <= 0:
+        return ""
+    preamble, sections = _worldbook_sections(text)
+    if not sections:
+        return text[:limit]
+    always, scored = [], []
+    for index, (title, block) in enumerate(sections):
+        if any(marker in title for marker in _WORLDBOOK_ALWAYS):
+            always.append((title, block))
+            continue
+        score = 0
+        for term in terms:
+            hits = block.count(term)
+            if hits:
+                score += min(hits, 3) * (2 if len(term) >= 4 else 1)
+            if term in title:
+                score += 4
+        scored.append((score, index, title, block))
+    always.sort(key=lambda item: 0 if "故事边界" in item[0] else 1)
+    ranked = sorted(scored, key=lambda item: (-item[0], item[1]))
+    if ranked and all(item[0] == 0 for item in ranked):
+        ranked = sorted(scored, key=lambda item: item[1])
+
+    blocks: list[str] = []
+    used = 0
+    if preamble:
+        intro = preamble[:220]
+        blocks.append(intro)
+        used += len(intro) + 2
+    for _, block in always:
+        if used + len(block) + 2 <= limit:
+            blocks.append(block)
+            used += len(block) + 2
+    added_ranked = False
+    for _, _, _, block in ranked:
+        remaining = limit - used
+        if remaining <= 120:
+            break
+        if len(block) + 2 <= remaining:
+            blocks.append(block)
+            used += len(block) + 2
+            added_ranked = True
+        elif not added_ranked:
+            trimmed = _trim_worldbook_block(block, remaining - 2)
+            if trimmed:
+                blocks.append(trimmed)
+                added_ranked = True
+                break
+    return "\n\n".join(blocks)
+
+
+def _worldbook_excerpt(story: dict, world: dict, stage: str, npc_name: str,
+                       limit: int, extra=()) -> str:
+    return _select_worldbook(
+        str(story.get("worldbook", "") or ""),
+        _worldbook_focus_terms(world if isinstance(world, dict) else {}, stage, npc_name, extra),
+        limit,
+    )
+
+
+def _format_stage_progress(stage: str, pack_name: str) -> str:
+    if not stage:
+        return ""
+    line = f"【剧情进度】当前阶段：{ECHO_STAGE_NAMES.get(stage, stage)}（{stage}）"
+    try:
+        line += "\n剧情管线：" + _build_worldline(pack_name, stage)
+    except Exception:
+        pass
+    return line
 
 
 def _format_choice_history(world: dict, session: dict) -> str:
@@ -699,7 +895,8 @@ def _generate_talk_single(req: dict, beat: Optional[dict], pack_name: str,
         card = next((c for c in characters if str(c.get("id")) == npc_id), {})
     stage = str(req.get("stage") or "")
     stage_name = ECHO_STAGE_NAMES.get(stage, stage)
-    worldbook = str(story.get("worldbook", "") or "")[:1200]
+    worldbook = _worldbook_excerpt(story, world, stage, npc_name, 1900)
+    progress_line = _format_stage_progress(stage, pack_name)
     recent_text = ""
     if isinstance(world, dict) and isinstance(world.get("history"), list):
         recent_text = "\n".join(
@@ -738,7 +935,7 @@ def _generate_talk_single(req: dict, beat: Optional[dict], pack_name: str,
         )
     user = (
         f"【世界观摘要】{worldbook}\n\n"
-        f"【当前阶段】{stage_name}（{stage}）\n"
+        f"{progress_line or f'【当前阶段】{stage_name}（{stage}）'}\n"
         f"【场景氛围】{atmosphere}\n"
         f"【本场节拍】{beat_desc}\n"
         f"【在场角色】{present}\n"
@@ -748,12 +945,15 @@ def _generate_talk_single(req: dict, beat: Optional[dict], pack_name: str,
         f"【最近剧情（务必不矛盾）】\n{recent_text or '（暂无）'}\n\n"
         f"{repeat_note}"
         "【输出要求】\n"
-        "1. 只生成与当前场景、当前任务步骤直接相关的内容；玩家当前处在哪一步就只谈这一步，不要跳到后面的事。\n"
+        "1. 只生成与当前场景、当前任务步骤直接相关的内容；玩家当前处在哪一步就只谈这一步，不要跳到后面的事；"
+        "当前步骤的目标未全部完成前，不要要求玩家提交任务或进入下一步。\n"
         "2. 3-6 句对白；其中至多 1 句极短旁白（speaker=narrator），其余为角色或玩家(su_ran)台词。\n"
         "3. 若未给定既定选项，则生成 2-3 个符合当前情境的下一步选项（每个一句话）。\n"
         "4. 只有当当前角色在台词中明确建议玩家“去找/问问/请教/拜访”某位在场角色时，才填写 suggestion；"
         "targets 只能取【可建议拜访的在场角色ID】中的 id，最多 2 个；只是提到名字、转述观点或没有明确建议时，suggestion 必须为 null。\n"
         "5. suggestion.reason 用一句与当前任务步骤相关的话说明去找他们确认什么。\n"
+        "6. 严格遵守【ECHO 世界真实状态】中的任务步骤与持有物品：玩家已获得的物品不得当成尚未取得，"
+        "已完成的步骤不得重复要求执行；当前处于哪一步就只推进这一步。\n"
         + ("本场没有可建议拜访的角色，suggestion 必须为 null。\n" if not targets_hint else "")
         + f"{choices_hint}\n\n"
         "只输出严格 JSON：\n"
@@ -1345,14 +1545,27 @@ def _convert_to_tree(req: dict, beat: Optional[dict], beat_id: str,
 def _chat_system_prompt(req: dict) -> str:
     _build_char_index()
     npc_id = req.get("npcId", "")
-    npc_name = req.get("npcName", npc_id)
-    scene = req.get("context", {}).get("sceneId", req.get("scene", ""))
+    npc_name = req.get("npcName") or npc_id
+    raw_ctx = req.get("context")
+    ctx = dict(raw_ctx) if isinstance(raw_ctx, dict) else {}
+    if not ctx.get("stage"):
+        ctx["stage"] = req.get("stage", "")
+    if not ctx.get("sceneId"):
+        ctx["sceneId"] = req.get("scene", "")
+    if not ctx.get("flags"):
+        ctx["flags"] = req.get("flags", [])
+    if not ctx.get("questProgress"):
+        ctx["questProgress"] = req.get("quests", [])
+    world = ctx.get("world") or req.get("world") or {}
+    if not isinstance(world, dict):
+        world = {}
+    scene = str(world.get("sceneId") or ctx.get("sceneId") or "")
+    stage = str(ctx.get("stage") or "")
     pack_name = _pack_for_scene(scene, None)
     try:
         story = _get_pack(pack_name)
-        worldbook = story.get("worldbook", "")
     except Exception:
-        worldbook = ""
+        story = {}
     info = _char_index.get(npc_id)
     card = (info or {}).get("card") or {}
     profile = req.get("npcProfile") or {}
@@ -1360,37 +1573,46 @@ def _chat_system_prompt(req: dict) -> str:
     background = card.get("background") or profile.get("background", "")
     speaking = card.get("speakingStyle") or profile.get("voiceTone", "")
 
-    ctx = req.get("context", {}) or {}
-    state_lines = []
-    if ctx.get("stage"):
-        state_lines.append(f"当前剧情阶段：{ECHO_STAGE_NAMES.get(ctx['stage'], ctx['stage'])}")
-    if ctx.get("sceneId"):
-        state_lines.append(f"当前场景：{ECHO_SCENE_NAMES.get(ctx['sceneId'], ctx['sceneId'])}")
-    flags = [f for f in (ctx.get("flags", []) or [])
-             if isinstance(f, str) and not f.startswith(("visited:", "talked:", "stage_", "echo_choice:"))]
-    if flags:
-        state_lines.append("已发生事件：" + "、".join(flags[:15]))
+    state_blocks = []
+    progress = _format_stage_progress(stage, pack_name)
+    if progress:
+        state_blocks.append(progress)
+    if world:
+        world_state = _format_world_state(world)
+        if world_state:
+            state_blocks.append(world_state)
+    else:
+        fallback = {
+            "stage": stage,
+            "quests": ctx.get("questProgress") or [],
+            "flags": ctx.get("flags") or [],
+            "world": {},
+        }
+        world_state = _format_echo_state(fallback)
+        if world_state:
+            state_blocks.append(world_state)
+
     history = req.get("history", []) or []
     hist_text = "\n".join(
         f"{'苏然' if h.get('role') == 'user' else npc_name}: {h.get('content', '')}"
         for h in history[-6:]
     ) or "（无）"
 
-    wb_excerpt = worldbook[:1500] if worldbook else ""
+    wb_excerpt = _worldbook_excerpt(story, world, stage, npc_name, 2200)
     return f"""你是互动叙事游戏《回响》中的角色 {npc_name}。
 
-## 世界书（最高优先级约束）
-{wb_excerpt}
+## 世界书（与当前场景/任务相关的设定，最高优先级约束）
+{wb_excerpt or '（无）'}
 
 ## 角色设定
 - 性格：{personality}
 - 背景：{background}
 - 说话风格：{speaking}
 
-## 当前游戏状态
-{chr(10).join(state_lines)}
+## 当前游戏状态（最高优先级，必须严格遵循）
+{chr(10).join(state_blocks) or '（无）'}
 
-## 对话历史
+## 对话历史（本次交谈）
 {hist_text}
 
 ## 任务
@@ -1401,6 +1623,11 @@ def _chat_system_prompt(req: dict) -> str:
 ## 规则
 - 共 7-9 行。{npc_name} 说 5-6 句，苏然只说 1-2 句（15-30字，追问/感叹）。
 - {npc_name} 台词 40-100 字，体现专业知识与个性，可连续 2-3 句再让苏然插话。
+- 必须围绕【进行中的任务】的当前步骤回应：玩家处在哪一步就只谈这一步，不跳阶段、不提前泄露后续剧情或结局。
+- 当前步骤的目标未全部完成前，不要要求玩家提交任务或进入下一步。
+- 严格区分已获得与未获得：玩家已持有的物品（见【持有物品】）不得说成尚未取得，已完成步骤不得重复要求执行。
+- 若 {npc_name} 不是当前任务的委托人，可以基于当前进度给出建议或评价，但不要代替委托人判定任务完成。
+- 提及任务物品、地点、人物时必须使用【当前游戏状态】中的真实名称，不得虚构状态之外的人或物。
 - emotion 从 idle/happy/angry/sad/surprise 中选。
 - speaker 只能是 "{npc_id}" 或 "su_ran"。
 - 符合世界书与角色身份，不要提及扮演，直接进入对话。"""
@@ -1483,7 +1710,9 @@ def continue_dialogue(req: dict) -> dict:
     npc_profile = str(req.get("npcProfile") or "").strip()[:300]
     world = req.get("world") or {}
     world_state = _format_world_state(world) if isinstance(world, dict) else ""
-    worldbook = str(story.get("worldbook", "") or "")[:800]
+    stage = str(req.get("stage") or "")
+    worldbook = _worldbook_excerpt(story, world, stage, npc_name, 1400)
+    progress_line = _format_stage_progress(stage, pack_name)
     recent = [h for h in (req.get("history") or []) if isinstance(h, dict)]
     recent_text = "\n".join(
         f"- {h.get('speaker', '')}：{str(h.get('text', '')).strip()[:80]}" for h in recent[-6:]
@@ -1496,11 +1725,14 @@ def continue_dialogue(req: dict) -> dict:
     )
     user = (
         f"【世界观】{worldbook}\n"
+        f"{progress_line}\n"
         f"【角色】{npc_name}（{role}）。性格：{personality}。{npc_profile}\n"
         f"【当前世界状态】\n{world_state}\n"
         f"【最近剧情】\n{recent_text}\n"
         f"【玩家刚刚选择】{player_choice}\n\n"
-        "请让该角色就这个选择继续回应/解释，2-4 句，口吻符合角色；可含 1 句旁白(speaker=narrator)。"
+        "请让该角色就这个选择继续回应/解释，2-4 句，口吻符合角色；可含 1 句旁白(speaker=narrator)。\n"
+        "必须沿用当前任务步骤与持有物品，不得把已获得的物品说成未取得，"
+        "不得在步骤目标未全部完成时要求提交，也不得跳阶段或泄露后续剧情。\n"
         '只输出严格 JSON：{"lines":[{"speaker":"角色id或narrator","text":"...","emotion":"idle"}]}'
     )
     try:
@@ -1551,6 +1783,16 @@ def continue_dialogue(req: dict) -> dict:
 # 背景图 / 语音合成（让融合不止于文字）
 # ═══════════════════════════════════════════════════════
 
+# 场景美术方向：生图提示词只写画面本身（不拼世界书原文，否则模型会把整段文字画进图里）
+_ECHO_SCENE_ART = {
+    "office": "记忆修复工坊的深夜：主操作台、神经接口阵列与数据存储机柜，窗外是新深圳的霓虹雨夜，仪器微光与冷色环境光",
+    "astro": "天体物理实验室：望远镜模型、星图与数据屏幕，冷蓝色仪器灯，安静的科研氛围",
+    "arpes": "ARPES 实验室：大型角分辨光电子能谱仪、真空腔体与样品杆，冷白色顶灯，金属质感",
+    "vr": "VR 实验室：环形体验舱、头显设备与发光线缆，蓝紫色科技光",
+    "solvay": "1927 年索尔维会议厅：木质长桌、高背椅与高窗，暖色历史质感，庄重的学术氛围",
+}
+
+
 def generate_background(req: dict) -> dict:
     """为 ECHO 场景生成背景图（无人物、可叠加 UI），返回 {url, enabled}。"""
     scene = str(req.get("scene") or "").strip()
@@ -1559,14 +1801,19 @@ def generate_background(req: dict) -> dict:
     pack_name = _pack_for_scene(scene, None)
     story = _get_pack(pack_name)
     scene_name = ECHO_SCENE_NAMES.get(scene, scene)
-    worldbook = str(story.get("worldbook", "") or "").strip()[:600]
+    genre = str(story.get("genre") or "").strip()
     atmosphere = str(req.get("atmosphere") or "").strip()
+    if atmosphere == scene_name:
+        atmosphere = ""
     override = str(req.get("prompt") or "").strip()
+    art = _ECHO_SCENE_ART.get(scene) or scene_name
     prompt = override or (
-        f"视觉小说对话背景（人物不在画面中）：{scene_name}。{atmosphere}。"
-        f"世界观参考：{worldbook}。"
-        "电影级构图，平视/略带景深的室内场景，氛围光影，画面下三分之一留出较暗区域便于叠加对话框，"
-        "写实与科幻/历史质感；满幅构图；不要人物、不要文字、不要水印、不要上下黑边、不要 UI。"
+        f"视觉小说场景背景，画面中没有任何人物：{scene_name}。{art}。"
+        + (f"{atmosphere}。" if atmosphere else "")
+        + (f"题材：{genre}。" if genre else "")
+        + "电影级构图，平视/略带景深的室内场景，氛围光影，画面底部保持较暗且干净；"
+          "满幅构图，写实与科幻/历史质感；只描绘环境本身，"
+          "画面内不要出现任何文字、招牌、文档、屏幕文字、对话框、按钮、边框、水印。"
     )
     gen = get_image_generator()
     if not gen.enabled:

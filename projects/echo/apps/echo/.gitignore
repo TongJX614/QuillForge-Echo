@@ -69,6 +69,9 @@ logs/
 *.rmvb
 *.vob
 
+# 游戏内开场与索尔维入场影像随仓库分发
+!public/videos/*.mp4
+
 # 归档文件
 *.iso
 *.dmg

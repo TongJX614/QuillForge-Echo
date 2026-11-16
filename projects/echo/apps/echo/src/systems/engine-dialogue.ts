@@ -46,13 +46,14 @@ export interface EngineWorldContext {
   quests: {
     id: string;
     title: string;
+    stepIndex?: number;
     stepDesc?: string;
     objectives?: { type: string; target: string; count?: number }[];
   }[];
   completedQuests: string[];
   flags: string[];
   inventory: { id: string; name: string; qty: number }[];
-  history: { speaker: string; text: string }[];
+  history: { speaker: string; text: string; sceneId?: string }[];
   choices: string[];
 }
 

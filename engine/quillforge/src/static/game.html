@@ -154,6 +154,20 @@
 <div class="container" id="app"></div>
 
 <script>
+// 服务商 Key：与首页共用同一 localStorage，所有请求自动附带
+(function () {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const key = localStorage.getItem('quillforge_provider_key') || '';
+    if (key) {
+      const headers = new Headers(init.headers || {});
+      headers.set('X-Provider-Key', key);
+      init = { ...init, headers };
+    }
+    return origFetch(input, init);
+  };
+})();
+
 const API = '';
 let sessionId = null;
 let chosenIndex = -1;
@@ -202,6 +216,22 @@ let vnCurrentAudioLineIdx = -1; // 当前播放音频对应的行索引
 
 // 美术素材
 let vnAssets = { characters: {}, scenes: {}, enabled: false };
+
+// 素材生成失败提示（可读原因，12 秒后自动消失；不影响继续游玩）
+function vnShowAssetNotice(text) {
+  if (!text) return;
+  let el = document.getElementById('vnAssetNotice');
+  if (!el) {
+    const host = document.querySelector('.vn-stage') || document.body;
+    el = document.createElement('div');
+    el.id = 'vnAssetNotice';
+    el.style.cssText = 'position:absolute;left:50%;bottom:96px;transform:translateX(-50%);max-width:min(680px,88vw);padding:8px 14px;border-radius:8px;background:rgba(197,84,77,.16);border:1px solid rgba(197,84,77,.5);color:#e8b4b0;font-size:12px;line-height:1.6;text-align:center;z-index:40;pointer-events:none';
+    host.appendChild(el);
+  }
+  el.textContent = text;
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => el.remove(), 12000);
+}
 
 // ─── 素材策略：背景/立绘未到位时不阻塞文本展示，素材就绪后自动热更新 ───
 
@@ -360,11 +390,15 @@ async function pregenerateAssets(assetsUrl) {
               if (progressAreaEl()) progressAreaEl().style.display = 'block';
             }
             if (msgEl()) msgEl().textContent = evt.message || '正在生成美术素材';
+            if (!evt.enabled && evt.message) vnShowAssetNotice(evt.message);
           } else if (evt.event === 'asset_progress') {
             if (!_hasProgress) { _hasProgress = true; if (progressAreaEl()) progressAreaEl().style.display = 'block'; }
             const pct = evt.total ? Math.round((evt.done / evt.total) * 100) : 0;
             if (fillEl()) fillEl().style.width = pct + '%';
             if (msgEl()) msgEl().textContent = `正在绘制「${evt.name}」（${evt.done}/${evt.total}）`;
+            if (evt.status === 'fallback' && evt.reason) {
+              vnShowAssetNotice(`「${evt.name}」生成失败：${evt.reason}（将用占位图继续）`);
+            }
           } else if (evt.event === 'assets_ready') {
             vnAssets = { characters: evt.characters || {}, scenes: evt.scenes || {}, enabled: !!evt.enabled };
             if (fillEl()) fillEl().style.width = '100%';
@@ -375,11 +409,14 @@ async function pregenerateAssets(assetsUrl) {
                 if (evt.scene_id) vnAssets.scenes[evt.scene_id] = evt.url;
                 if (evt.scene_name && evt.scene_name !== evt.scene_id) vnAssets.scenes[evt.scene_name] = evt.url;
                 vnApplyBackground(vnState.meta);
+              } else if (evt.reason) {
+                vnShowAssetNotice(`场景背景生成失败：${evt.reason}（将用占位图继续）`);
               }
             }
           } else if (evt.event === 'asset_char_ready') {
             if (sessionId === mySessionId && evt.char_name) {
               if (evt.url) vnAssets.characters[evt.char_name] = evt.url;
+              else if (evt.reason) vnShowAssetNotice(`角色立绘生成失败：${evt.reason}（将用文字继续）`);
               // 角色已在舞台上（有位置但无 DOM）→ 补建立绘
               if (evt.url) {
                 const spritesEl = document.getElementById('vnSprites');
@@ -1416,6 +1453,8 @@ async function realtimeChooseInVN(choiceIndex) {
                 if (evt.scene_id) vnAssets.scenes[evt.scene_id] = evt.url;
                 if (evt.scene_name && evt.scene_name !== evt.scene_id) vnAssets.scenes[evt.scene_name] = evt.url;
                 if (sceneRendered) vnApplyBackground(vnState.meta);
+              } else if (evt.reason) {
+                vnShowAssetNotice(`场景背景生成失败：${evt.reason}（将用占位图继续）`);
               }
             } else if (evt.event === 'asset_char_ready') {
               if (evt.char_name) {
@@ -1431,6 +1470,8 @@ async function realtimeChooseInVN(choiceIndex) {
                     spritesEl.appendChild(div);
                   }
                 }
+                } else if (evt.reason) {
+                  vnShowAssetNotice(`角色立绘生成失败：${evt.reason}（将用文字继续）`);
                 }
             }
           } catch(pe) { if (pe.message && !pe.message.includes('JSON')) throw pe; }

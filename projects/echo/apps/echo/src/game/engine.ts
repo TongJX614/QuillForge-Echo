@@ -363,13 +363,17 @@ export class GameEngine {
       const ch = CHARACTERS[key];
       return ch?.name ?? npc?.entity.name ?? key;
     };
-    this.dialogueUI.onGetAIContext = () => ({
-      playerName: '苏然',
-      sceneId: this.currentSceneId,
-      stage: this.progressManager.getStage(),
-      questProgress: this.questManager.getActiveQuests().map(q => ({ id: q.definition.id, title: q.definition.title, stepIndex: q.runtime.currentStepIndex })),
-      flags: Array.from(this.progressManager['flags'] as Set<string>),
-    });
+    this.dialogueUI.onGetAIContext = () => {
+      const world = this.buildWorldContext();
+      return {
+        playerName: '苏然',
+        sceneId: world.sceneId,
+        stage: this.progressManager.getStage(),
+        questProgress: world.quests,
+        flags: world.flags,
+        world,
+      };
+    };
     this.statusUI = new StatusUI();
     this.questUI = new QuestUI();
     this.notificationUI = new NotificationUI(container, this.notificationSystem);
@@ -2025,16 +2029,17 @@ export class GameEngine {
   /** VR 对话进入索尔维：全屏视频转场（首次），之后走常规黑屏过渡 */
   private async enterSolvayCinematic(): Promise<void> {
     this.dialogueSystem.end();
-    if (this.progressManager.hasFlag('solvay_intro_seen')) {
+    // 旧标记是在视频素材缺失的版本里写入的，换新标记让现有存档补看一次
+    if (this.progressManager.hasFlag('solvay_intro_video_seen')) {
       this.startTransition('solvay');
       return;
     }
-    this.progressManager.setFlag('solvay_intro_seen');
     this.solvayIntroPlaying = true;
     // 视频层全屏遮盖期间后台切换场景，淡出时正好露出已加载好的索尔维
     void this.switchScene('solvay');
     try {
       await playSolvayIntroVideo(this.gameContainer, '/videos/solvay-enter.mp4');
+      this.progressManager.setFlag('solvay_intro_video_seen');
     } finally {
       this.solvayIntroPlaying = false;
     }
@@ -2439,9 +2444,8 @@ export class GameEngine {
         npcName,
         npcProfile: this.buildNpcProfile(npcId),
         history: this.recentTranscript
-          .filter((h) => h.sceneId === this.currentSceneId)
-          .slice(-6)
-          .map(({ speaker, text }) => ({ speaker, text })),
+          .slice(-8)
+          .map(({ speaker, text, sceneId }) => ({ speaker, text, sceneId })),
         world: this.buildWorldContext(),
       });
     } finally {
@@ -2525,8 +2529,8 @@ export class GameEngine {
       const speaker = line.speaker === 'narrator' ? '旁白' : nameOf(line.speaker);
       this.recentTranscript.push({ speaker, text: line.text, sceneId: tree.scene || this.currentSceneId });
     }
-    if (this.recentTranscript.length > 16) {
-      this.recentTranscript = this.recentTranscript.slice(-16);
+    if (this.recentTranscript.length > 24) {
+      this.recentTranscript = this.recentTranscript.slice(-24);
     }
   }
 
@@ -2559,6 +2563,7 @@ export class GameEngine {
       return {
         id: q.definition.id,
         title: q.definition.title,
+        stepIndex: q.runtime.currentStepIndex,
         stepDesc: step?.desc ?? '',
         objectives: (step?.objectives ?? []).map((o) => ({
           type: o.type,
@@ -2582,13 +2587,9 @@ export class GameEngine {
       flags,
       inventory,
       history: this.recentTranscript
-        .filter((h) => h.sceneId === this.currentSceneId)
         .slice(-12)
-        .map(({ speaker, text }) => ({ speaker, text })),
-      choices: this.recentChoices
-        .filter((c) => c.sceneId === this.currentSceneId)
-        .slice(-8)
-        .map((c) => c.text),
+        .map(({ speaker, text, sceneId }) => ({ speaker, text, sceneId })),
+      choices: this.recentChoices.slice(-8).map((c) => c.text),
     };
   }
 

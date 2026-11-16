@@ -9,7 +9,7 @@ const request: LaunchVrExperienceRequest = {
 
 assert.deepEqual(prepareVrExperience(request), {
   status: 'ready',
-  url: 'http://127.0.0.1:8050/weave/',
+  url: 'http://127.0.0.1:8050/',
 });
 assert.deepEqual(
   prepareVrExperience({

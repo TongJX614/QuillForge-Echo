@@ -96,6 +96,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── 按请求透传服务商 Key（前端设置页每浏览器自己的 Key）──
+from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
+from provider_key import set_provider_key as _set_provider_key, HEADER_NAME as _PROVIDER_HEADER
+
+
+class ProviderKeyMiddleware(_BaseHTTPMiddleware):
+    """X-Provider-Key 头写入 context 变量；生图/语音/LLM 优先用它，缺失回退 .env"""
+
+    async def dispatch(self, request, call_next):
+        _set_provider_key(request.headers.get(_PROVIDER_HEADER, ""))
+        return await call_next(request)
+
+
+app.add_middleware(ProviderKeyMiddleware)
+
 # ── 限流（slowapi）──
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -126,7 +141,7 @@ if _API_KEY:
 from routes import (
     pages_router, script_gen_router, story_router,
     upload_router, auto_run_router, session_router,
-    realtime_router, assets_router,
+    realtime_router, assets_router, settings_router,
 )
 app.include_router(pages_router)
 app.include_router(script_gen_router)
@@ -136,6 +151,7 @@ app.include_router(auto_run_router)
 app.include_router(session_router)
 app.include_router(realtime_router)
 app.include_router(assets_router)
+app.include_router(settings_router)
 
 # ── 引擎自带静态资源（前端按 /static/<file> 取用）──
 from fastapi.staticfiles import StaticFiles
@@ -204,8 +220,8 @@ def main():
     if args.api_key:
         os.environ["OPENAI_API_KEY"] = args.api_key
 
-    if not (args.api_key or settings.openai_api_key):
-        logger.warning("[WARNING] 未设置 API Key")
+    if not (args.api_key or settings.openai_api_key or settings.deepseek_api_key):
+        logger.warning("[WARNING] 未设置 API Key（DEEPSEEK_API_KEY / OPENAI_API_KEY 均为空）")
 
     # 项目进程的自启动钩子需要知道引擎实际监听的端口
     _ACTUAL_PORT = args.port

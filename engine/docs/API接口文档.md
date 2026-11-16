@@ -1,6 +1,10 @@
 # QuillForge — API 接口文档
 
 > 版本：6.0.0 | 最后更新：2026-08-06 | 基础地址：`http://localhost:8050` | Swagger 文档：`http://localhost:8050/docs`
+>
+> 本文件记录引擎的基础接口，写于上游 6.0.0 时期。融合实例会由挂载项目追加
+> 路由，端点总数随 `QUILLFORGE_PROJECTS` 变化；当前清单以运行实例的
+> `/openapi.json` 或 `/docs` 为准。
 
 ---
 

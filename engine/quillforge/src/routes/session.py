@@ -22,12 +22,12 @@ logger = get_logger("routes.session")
 
 router = APIRouter(tags=["session"])
 
-# 美术素材并行生成并发数
-IMAGE_CONCURRENCY = int(os.getenv("IMAGE_CONCURRENCY", "7"))
+# 美术素材并行生成并发数（千问生图账户上限 10，留余量取 8）
+IMAGE_CONCURRENCY = int(os.getenv("IMAGE_CONCURRENCY", "8"))
 # Phase 1 仅预加载第 1 个场景
 IMAGE_BG_PRELOAD_COUNT = 1
 # 单场景图片并发上限（超过则滑动窗口分批提交）
-SCENE_IMAGE_CAP = int(os.getenv("SCENE_IMAGE_CAP", "7"))
+SCENE_IMAGE_CAP = int(os.getenv("SCENE_IMAGE_CAP", "8"))
 # TTS 并行生成并发数：典型场景对话 6-12 条，6 个 worker 可在 2 轮内处理完毕
 TTS_CONCURRENCY = int(os.getenv("TTS_CONCURRENCY", "6"))
 
@@ -154,7 +154,7 @@ def assets_stream(session_id: str):
     """
     分两阶段预生成美术素材（SSE 推送进度）：
       Phase 1（阻塞）：仅第 1 个场景的背景 + 出场角色立绘 → assets_ready
-        并发上限 SCENE_IMAGE_CAP(9) 张，超过则滑动窗口分批提交，
+        并发上限 SCENE_IMAGE_CAP（默认 8）张，超过则滑动窗口分批提交，
         必须全部完成才放行进入剧情。
       Phase 2（后台）：剩余场景背景 + 剩余角色立绘，异步生成并推送热更新
     """
@@ -235,7 +235,7 @@ def assets_stream(session_id: str):
         yield {"event": "assets_meta", "enabled": gen.enabled, "total": total,
                "phase1_total": len(phase1_tasks),
                "message": (f"正在生成第 1 个场景的素材（共 {total} 张）" if gen.enabled
-                           else "加载美术素材（缓存模式）")}
+                           else "未配置生图 Key：本轮使用占位图（可在首页「设置」里填写）")}
 
         # ─── Phase 1：滑动窗口，最多 SCENE_IMAGE_CAP 张同时生成 ───
         phase1_done = 0
@@ -278,7 +278,9 @@ def assets_stream(session_id: str):
                         phase1_done += 1
                         yield {"event": "asset_progress", "kind": t["kind"], "name": t["name"],
                                "done": phase1_done, "total": len(phase1_tasks),
-                               "status": "done" if url else "fallback", "url": url}
+                               "status": "done" if url else "fallback", "url": url,
+                               "reason": ("" if url else
+                                          gen.failure_reason(t["cache_kind"], t["cache_id"]))}
                     # 补充新任务填满窗口
                     while pending and len(in_flight) < cap:
                         t = pending.pop(0)
@@ -318,12 +320,16 @@ def assets_stream(session_id: str):
                         if store_kind == "char":
                             yield {"event": "asset_char_ready",
                                    "char_name": key_a, "url": url, "name": t["name"],
-                                   "status": "done" if url else "fallback"}
+                                   "status": "done" if url else "fallback",
+                                   "reason": ("" if url else
+                                              gen.failure_reason(t["cache_kind"], t["cache_id"]))}
                         else:
                             yield {"event": "asset_bg_ready",
                                    "scene_id": key_a, "scene_name": key_b,
                                    "url": url, "name": t["name"],
-                                   "status": "done" if url else "fallback"}
+                                   "status": "done" if url else "fallback",
+                                   "reason": ("" if url else
+                                              gen.failure_reason(t["cache_kind"], t["cache_id"]))}
                 except concurrent.futures.TimeoutError:
                     logger.warning("[assets_stream] Phase 2 超时(300s)，跳过未完成任务")
 

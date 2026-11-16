@@ -70,7 +70,7 @@ class EchoSettings:
     port_max_offset: int = 30
     node: str = ""
     launch_mode: str = "dev"
-    launch_timeout: float = 90.0
+    launch_timeout: float = 120.0
     weave_game_home: Path = DEFAULT_WEAVE_HOME
 
 
@@ -85,7 +85,7 @@ def get_echo_settings() -> EchoSettings:
         port_max_offset=_env_int("ECHO_PORT_MAX_OFFSET", 30),
         node=os.environ.get("ECHO_NODE", "").strip(),
         launch_mode=os.environ.get("ECHO_LAUNCH_MODE", "dev").strip() or "dev",
-        launch_timeout=_env_float("ECHO_LAUNCH_TIMEOUT", 90.0),
+        launch_timeout=_env_float("ECHO_LAUNCH_TIMEOUT", 120.0),
         weave_game_home=_env_path("WEAVE_GAME_HOME", DEFAULT_WEAVE_HOME),
     )
 

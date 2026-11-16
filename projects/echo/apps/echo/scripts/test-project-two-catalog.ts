@@ -7,7 +7,7 @@ const rawUrl = buildProjectTwoEntryUrl({ experienceId: 'narrative-engine-webui' 
 assert.ok(rawUrl);
 const url = new URL(rawUrl);
 assert.equal(url.origin, 'http://127.0.0.1:8050');
-assert.equal(url.pathname, '/weave/');
+assert.equal(url.pathname, '/');
 assert.equal(url.search, '');
 assert.equal(url.hash, '');
 
@@ -34,12 +34,12 @@ assert.equal(
     experienceId: 'narrative-engine-webui',
     targetUrl: 'https://attacker.example',
   } as unknown as LaunchVrExperienceRequest),
-  'http://192.0.2.10:9123/weave/',
+  'http://192.0.2.10:9123/',
 );
 delete runtimeHost.__ECHO_RUNTIME__;
 assert.equal(
   buildProjectTwoEntryUrl({ experienceId: 'narrative-engine-webui' }),
-  'http://127.0.0.1:8050/weave/',
+  'http://127.0.0.1:8050/',
 );
 
 console.log('PROJECT_TWO_ENTRY_URL=PASS');

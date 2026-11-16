@@ -92,6 +92,8 @@ class SolvayIntroLayer {
     this.hint = layer.querySelector<HTMLElement>('.si-hint')!;
 
     this.video.addEventListener('ended', () => this.closeOut(), { once: true });
+    this.video.addEventListener('error', () => this.closeOut(), { once: true });
+    layer.addEventListener('click', () => this.skip());
     this.schedule(() => this.closeOut(), 18200); // 兜底：视频元数据异常时保证收尾
 
     requestAnimationFrame(() => requestAnimationFrame(() => { this.video.style.opacity = '1'; }));

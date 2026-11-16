@@ -55,6 +55,25 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .upload-zone .hint{font-size:12px;color:var(--muted);margin-top:8px;opacity:.5}
 .file-input{display:none}
 
+/* 生成区：输入框 + 右侧操作列（上传文件夹 / 开始创作） */
+.prompt-compose{display:grid;grid-template-columns:minmax(0,1fr) 148px;gap:12px;align-items:stretch;max-width:680px;margin:0 auto 8px}
+.prompt-field{position:relative;min-width:0}
+.prompt-field textarea{height:100%;min-height:168px;box-sizing:border-box}
+.prompt-rail{display:flex;flex-direction:column;gap:10px;width:148px}
+.folder-tile{margin:0;padding:14px 10px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;flex:1;min-height:0;text-align:center}
+.folder-tile .icon{font-size:24px;margin:0;line-height:1}
+.folder-tile p{font-size:13px;line-height:1.4;letter-spacing:.08em}
+.folder-tile .hint{font-size:10px;margin:0;opacity:.45}
+.folder-tile .zone-tag,.folder-tile .zone-stamp{display:none}
+.prompt-rail .btn-primary{width:100%;padding:14px 0;font-size:15px;justify-content:center;flex:0 0 auto}
+.prompt-foot{max-width:680px;margin:10px auto 0;display:flex;align-items:center;justify-content:space-between}
+@media(max-width:640px){
+  .prompt-compose{grid-template-columns:1fr}
+  .prompt-rail{width:auto;flex-direction:row}
+  .folder-tile{flex:1;min-height:64px;flex-direction:row;gap:10px;padding:12px 14px}
+  .prompt-rail .btn-primary{width:auto;padding:14px 24px;flex:0 0 auto}
+}
+
 /* Sample Cards — 证物袋风格 */
 .samples{display:flex;flex-direction:column;gap:14px;margin-top:20px}
 .sample-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 24px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
@@ -151,16 +170,53 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 @media(max-width:640px){.side-mark{display:none}.case-head .stamp{right:4px!important}}
 /* 已接入项目示例区：引擎只提供容器与版式位置，内容样式由项目自带 */
 .project-showcase{margin:0 0 40px}
-/* 已保存剧本：默认折叠，标题行可点击展开 */
-.samples-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px}
-.samples-toggle:hover{color:var(--text-strong)}
+/* 已保存剧本：默认只显示最近 3 卷，可展开全部并批量删除 */
+.samples-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.samples-head .section-label{flex:1;min-width:220px;margin-bottom:0}
 .samples-count{font-family:var(--font-mono);font-size:11px;color:var(--accent);border:1px solid rgba(111,168,160,.35);border-radius:8px;padding:1px 8px}
-.samples-caret{font-size:12px;color:var(--muted);transition:transform .15s}
-/* 单张剧本卡的删除按钮：默认半隐，悬停卡片时显现 */
+.samples-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.samples-tool{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(24,34,52,.5);color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.samples-tool:hover{border-color:var(--border-hover);color:var(--text-strong)}
+.samples-tool.danger{color:var(--danger);border-color:rgba(228,87,46,.35)}
+.samples-tool.danger:hover{border-color:var(--danger);background:rgba(228,87,46,.08)}
+.samples-tool:disabled{opacity:.4;cursor:not-allowed}
+.sample-card[hidden]{display:none}
 .sample-card{position:relative}
-.sample-del{position:absolute;top:10px;right:10px;width:22px;height:22px;line-height:20px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;opacity:0;transition:opacity .15s,border-color .15s,color .15s}
-.sample-card:hover .sample-del,.sample-del:focus-visible{opacity:1}
-.sample-del:hover{color:var(--danger);border-color:var(--danger)}
+.sample-card::before{right:44px}
+.sample-card .title{padding-right:132px}
+.sample-pick{position:absolute;top:12px;right:12px;z-index:3;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;border:1px solid var(--border);background:rgba(10,14,13,.72);cursor:pointer;transition:border-color .15s,background .15s}
+.sample-pick:hover{border-color:var(--action)}
+.sample-pick input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.sample-tick{width:14px;height:14px;border:1px solid var(--border-hover);border-radius:4px;background:transparent;position:relative;transition:background .15s,border-color .15s}
+.sample-pick:hover .sample-tick{border-color:var(--action)}
+.sample-pick input:checked + .sample-tick{background:var(--danger);border-color:var(--danger)}
+.sample-pick input:checked + .sample-tick::after{content:'';position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.sample-pick input:focus-visible + .sample-tick{outline:2px solid var(--action);outline-offset:2px}
+.sample-pick input:disabled + .sample-tick{cursor:not-allowed;opacity:.3}
+.sample-card.picked{border-color:rgba(228,87,46,.55);background:rgba(228,87,46,.06)}
+.sample-card.picked::after{background:linear-gradient(180deg,var(--accent),rgba(228,87,46,.2));opacity:1}
+.sample-lock{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:6px;border:1px solid rgba(111,168,160,.3);color:var(--muted);font-size:10px;font-family:var(--font-mono);letter-spacing:1px;vertical-align:2px}
+@media(max-width:640px){
+  .samples-head{gap:10px}
+  .samples-head .section-label{min-width:100%}
+  .samples-tools{width:100%;justify-content:flex-start}
+}
+/* 服务商 Key 设置入口（每浏览器存自己的 Key）：放在页头右侧，与版本号同一行不遮挡 */
+.header-right{display:flex;align-items:center;justify-content:flex-end;gap:14px;min-width:0}
+.settings-btn{padding:6px 14px;font-size:12px;letter-spacing:.12em;border:1px solid rgba(111,168,160,.45);border-radius:8px;background:rgba(10,14,13,.72);color:var(--muted);cursor:pointer;white-space:nowrap}
+.settings-btn:hover{color:var(--text-strong);border-color:var(--accent)}
+@media(max-width:640px){.header{padding:12px 16px;gap:8px}.header-right{gap:8px}.header .meta{font-size:11px;letter-spacing:0}.settings-btn{padding:5px 10px;letter-spacing:.04em}}
+.settings-dialog{border:1px solid rgba(111,168,160,.4);border-radius:12px;background:var(--bg,#101614);color:var(--text-strong);padding:22px 24px;width:min(440px,92vw)}
+.settings-dialog::backdrop{background:rgba(0,0,0,.55)}
+.settings-dialog h3{margin:0 0 8px;font-size:15px;letter-spacing:.08em}
+.settings-hint{margin:0 0 14px;font-size:12px;line-height:1.7;color:var(--muted)}
+.settings-dialog input{width:100%;box-sizing:border-box;padding:9px 10px;font-family:var(--font-mono);font-size:12px;color:var(--text-strong);background:rgba(255,255,255,.04);border:1px solid rgba(111,168,160,.35);border-radius:8px;outline:none}
+.settings-dialog input:focus{border-color:var(--accent)}
+.settings-actions{display:flex;gap:10px;margin-top:14px}
+.settings-actions button{padding:7px 16px;font-size:12px;letter-spacing:.08em;border-radius:8px;border:1px solid rgba(111,168,160,.4);background:transparent;color:var(--muted);cursor:pointer}
+.settings-actions button:hover{color:var(--text-strong);border-color:var(--accent)}
+.settings-actions .primary{background:var(--accent);border-color:var(--accent);color:#0b0f0e}
+.settings-state{margin-top:10px;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -173,15 +229,106 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 
 <div class="header">
   <h1>QuillForge</h1>
-  <div class="meta" id="headerMeta">QUILLFORGE · v6.0.0</div>
+  <div class="header-right">
+    <div class="meta" id="headerMeta">QUILLFORGE · v6.0.0</div>
+    <button class="settings-btn" id="settingsBtn" type="button">设置</button>
+  </div>
 </div>
+
+<dialog class="settings-dialog" id="settingsDialog">
+  <h3>服务商 API Key</h3>
+  <p class="settings-hint">保存后本浏览器的文本生成、生图、语音优先用这个 Key（只存在本浏览器，只发给本地引擎）；清除后回退服务器 .env 配置。</p>
+  <input id="providerKeyInput" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+  <div class="settings-actions">
+    <button id="providerKeySave" class="primary" type="button">保存并验证</button>
+    <button id="providerKeyClear" type="button">清除</button>
+    <button id="settingsClose" type="button">关闭</button>
+  </div>
+  <div class="settings-state" id="providerKeyState"></div>
+  <div class="settings-state" id="providerKeyModels"></div>
+</dialog>
 
 <div class="container" id="app"></div>
 
 <script>
+// ─── 服务商 Key：每浏览器各自保存，所有请求自动附带 ───
+const PROVIDER_KEY_STORAGE = 'quillforge_provider_key';
+(function () {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const key = localStorage.getItem(PROVIDER_KEY_STORAGE) || '';
+    if (key) {
+      const headers = new Headers(init.headers || {});
+      headers.set('X-Provider-Key', key);
+      init = { ...init, headers };
+    }
+    return origFetch(input, init);
+  };
+})();
+
 const API = '';
 let currentScript = null;  // {script_id, summary}
 const app = document.getElementById('app');
+
+// ─── 设置对话框：保存到本浏览器，并向后端回读确认 ───
+(function () {
+  const dlg = document.getElementById('settingsDialog');
+  const input = document.getElementById('providerKeyInput');
+  const state = document.getElementById('providerKeyState');
+  const models = document.getElementById('providerKeyModels');
+
+  const localLine = () => {
+    const key = localStorage.getItem(PROVIDER_KEY_STORAGE) || '';
+    return key ? `已保存到本浏览器：${key.slice(0, 8)}...${key.slice(-4)}` : '本浏览器未保存 Key';
+  };
+
+  async function refreshBackendStatus() {
+    state.textContent = localLine() + '，正在向后端确认...';
+    models.textContent = '';
+    try {
+      const res = await fetch('/api/settings/provider-key', { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const d = await res.json();
+      const browser = d.browser_key || {};
+      const env = d.env_keys || {};
+      let line;
+      if (browser.present) {
+        line = `✓ 后端已读到本浏览器的 Key（${browser.masked}），文本 / 生图 / 语音都使用它`;
+      } else if (d.effective === 'env') {
+        line = `后端使用服务器 .env 的 Key（文本 ${env.text || '未设'} · 生图 ${env.image || '未设'} · 语音 ${env.tts || '未设'}）`;
+      } else {
+        line = '⚠ 后端没有可用的 Key：生成类功能不可用，请保存 Key 后重试';
+      }
+      const m = d.models || {};
+      const fmt = (x) => {
+        if (!x || !x.primary) return '未配置';
+        return x.primary + ((x.fallbacks && x.fallbacks.length) ? '（备选 ' + x.fallbacks.join(' / ') + '）' : '');
+      };
+      state.textContent = line;
+      models.textContent = `模型：文本 ${fmt(m.text)} · 生图 ${fmt(m.image)} · 语音 ${fmt(m.tts)}`;
+    } catch (err) {
+      state.textContent = localLine() + '；后端状态读取失败：' + err.message;
+    }
+  }
+
+  document.getElementById('settingsBtn').addEventListener('click', () => {
+    input.value = localStorage.getItem(PROVIDER_KEY_STORAGE) || '';
+    refreshBackendStatus();
+    dlg.showModal();
+  });
+  document.getElementById('providerKeySave').addEventListener('click', () => {
+    const v = input.value.trim();
+    if (v) localStorage.setItem(PROVIDER_KEY_STORAGE, v);
+    else localStorage.removeItem(PROVIDER_KEY_STORAGE);
+    refreshBackendStatus();
+  });
+  document.getElementById('providerKeyClear').addEventListener('click', () => {
+    localStorage.removeItem(PROVIDER_KEY_STORAGE);
+    input.value = '';
+    refreshBackendStatus();
+  });
+  document.getElementById('settingsClose').addEventListener('click', () => dlg.close());
+})();
 
 // ─── 首页 ─────────────────────────────────────
 
@@ -201,14 +348,20 @@ async function showHomeScreen() {
     return;
   }
 
-  const sampleCards = samples.map((s, idx) => `
-    <div class="sample-card" data-idx="${idx}" data-path="${s.path}" data-realtime="${s.is_realtime ? '1' : ''}" data-evidence="EVID-${String(idx + 1).padStart(2, '0')}">
-      <button class="sample-del" data-del="${escapeHtml(s.filename)}" title="删除该剧本" aria-label="删除该剧本">✕</button>
-      <div class="title">${escapeHtml(s.title || s.filename)}${s.is_realtime ? '<span class="rt-badge">实时</span>' : ''}</div>
+  const sampleCards = samples.map((s, idx) => {
+    const canDelete = s.deletable !== false && !s.protected;
+    const lockText = s.protected ? '项目使用中' : (canDelete ? '' : '不可删除');
+    return `
+    <div class="sample-card" data-idx="${idx}" data-path="${s.path}" data-realtime="${s.is_realtime ? '1' : ''}" data-evidence="EVID-${String(idx + 1).padStart(2, '0')}"${idx >= 3 ? ' hidden' : ''}>
+      <label class="sample-pick" title="${canDelete ? '选择此剧本' : '受保护或非目录剧本，不能删除'}">
+        <input type="checkbox" class="sample-check" value="${escapeHtml(s.filename)}"${canDelete ? '' : ' disabled'}>
+        <span class="sample-tick" aria-hidden="true"></span>
+      </label>
+      <div class="title">${escapeHtml(s.title || s.filename)}${s.is_realtime ? '<span class="rt-badge">实时</span>' : ''}${lockText ? `<span class="sample-lock">${lockText}</span>` : ''}</div>
       <div class="info">${escapeHtml(s.worldline || '')} · ${s.total_scenes || 0} 个场景</div>
       <div class="tags">${(s.characters||[]).map(c=>`<span class="tag">${escapeHtml(c)}</span>`).join('')}</div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   app.innerHTML = `
     <div class="upload-section">
@@ -222,18 +375,26 @@ async function showHomeScreen() {
         <div class="case-meta">立案 ${new Date().getFullYear()}.${String(new Date().getMonth()+1).padStart(2,'0')}.${String(new Date().getDate()).padStart(2,'0')} · 建档 QUILLFORGE 档案室 · 共收录 ${samples.length} 卷剧本</div>
         <div class="stamp" style="right:6%;top:26px">立案<br>受理</div>
       </div>
-      <div style="max-width:680px;margin:0 auto 8px">
-        <div style="position:relative">
+      <div class="prompt-compose">
+        <div class="prompt-field">
           <textarea id="aiPromptInput" rows="4" maxlength="150"
               style="width:100%;padding:18px 20px;background:var(--card);border:1px solid var(--border-hover);border-radius:12px;color:var(--text);font-size:15px;line-height:1.7;outline:none;transition:border-color .2s;resize:none;font-family:inherit;position:relative;z-index:1"
               onfocus="this.style.borderColor='var(--accent2)'" onblur="this.style.borderColor='var(--border)'"></textarea>
-            <div id="aiPlaceholder" style="position:absolute;top:0;left:0;right:0;padding:18px 20px;color:var(--muted);font-size:16px;line-height:1.7;pointer-events:none;z-index:2;white-space:pre-wrap;overflow:hidden;min-height:calc(1.7em * 4 + 36px)"></div>
+          <div id="aiPlaceholder" style="position:absolute;top:0;left:0;right:0;padding:18px 20px;color:var(--muted);font-size:16px;line-height:1.7;pointer-events:none;z-index:2;white-space:pre-wrap;overflow:hidden;min-height:calc(1.7em * 4 + 36px)"></div>
+        </div>
+        <div class="prompt-rail">
+          <div class="upload-zone folder-tile" id="dropFolderZone" role="button" tabindex="0" aria-label="上传剧本文件夹">
+            <div class="icon">⬡</div>
+            <p>上传文件夹</p>
+            <p class="hint">保留子目录</p>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
-            <span id="charCount" style="font-size:12px;color:var(--muted)">0 / 150</span>
-            <button class="btn btn-primary" id="aiGenerateBtn" style="padding:14px 40px;font-size:15px">开始创作</button>
-          </div>
+          <button class="btn btn-primary" id="aiGenerateBtn">开始创作</button>
+        </div>
       </div>
+      <div class="prompt-foot">
+        <span id="charCount" style="font-size:12px;color:var(--muted)">0 / 150</span>
+      </div>
+      <input type="file" id="folderInput" class="file-input" webkitdirectory multiple>
 
       <!-- 分隔线（档案骑缝线） -->
       <div style="display:flex;align-items:center;gap:16px;margin:36px 0 28px">
@@ -241,18 +402,6 @@ async function showHomeScreen() {
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;font-family:var(--font-mono);letter-spacing:3px">◈ 或选择已有剧本 ◈</span>
         <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)"></div>
       </div>
-
-      <!-- 文件夹上传 -->
-      <div style="margin-bottom:24px">
-        <div class="upload-zone" id="dropFolderZone" style="padding:26px 20px">
-          <span class="zone-tag">EVIDENCE INTAKE // 文件夹受理窗口</span>
-          <span class="zone-stamp">证据收件</span>
-          <div class="icon">⬡</div>
-          <p>点击选择文件夹上传</p>
-          <p class="hint">保留子目录结构</p>
-        </div>
-      </div>
-      <input type="file" id="folderInput" class="file-input" webkitdirectory multiple>
     </div>
 
     <!-- 已接入项目的示例入口。容器与位置由引擎提供（在已保存剧本之上），
@@ -260,8 +409,15 @@ async function showHomeScreen() {
          首页版式与上游一致。 -->
     <section class="project-showcase" id="projectShowcase" hidden></section>
 
-    <div class="section-label samples-toggle" id="samplesToggle" role="button" tabindex="0" aria-expanded="false">已保存剧本 · Saved Cases<span class="samples-count">${samples.length}</span><span class="samples-caret">▸</span></div>
-    <div class="samples" id="samplesList" hidden>${sampleCards || '<p style="color:var(--muted)">暂无剧本</p>'}</div>
+    <div class="samples-head">
+      <div class="section-label">已保存剧本 · Saved Cases<span class="samples-count">${samples.length}</span></div>
+      <div class="samples-tools">
+        <button class="samples-tool" id="samplesSelectAll"${samples.length ? '' : ' disabled'}>全选</button>
+        <button class="samples-tool danger" id="samplesDeleteSelected" disabled>删除选中</button>
+        <button class="samples-tool" id="samplesMore"${samples.length > 3 ? '' : ' hidden'}>查看更多（${Math.max(0, samples.length - 3)}）</button>
+      </div>
+    </div>
+    <div class="samples" id="samplesList">${sampleCards || '<p style="color:var(--muted)">暂无剧本</p>'}</div>
     <div class="footer-strip">
       <span>QUILLFORGE · NARRATIVE ENGINE v6.0.0</span>
       <div class="dots"><i></i><i></i><i></i></div>
@@ -351,52 +507,89 @@ async function showHomeScreen() {
   const dfz = document.getElementById('dropFolderZone');
   const folderIn = document.getElementById('folderInput');
   dfz.addEventListener('click', () => folderIn.click());
+  dfz.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); folderIn.click(); }
+  });
   folderIn.addEventListener('change', e => { if(e.target.files.length > 0) uploadFolder(e.target.files); });
 
-  // Sample card clicks — use event delegation
+  // 已保存剧本：默认只露出最近 3 卷；勾选后可批量删除
   const samplesList = document.getElementById('samplesList');
+  const moreBtn = document.getElementById('samplesMore');
+  const selectAllBtn = document.getElementById('samplesSelectAll');
+  const deleteSelectedBtn = document.getElementById('samplesDeleteSelected');
+  const sampleChecks = () => Array.from(samplesList.querySelectorAll('.sample-check:not(:disabled)'));
+
+  const updateSampleSelection = () => {
+    const checks = sampleChecks();
+    const checked = checks.filter(c => c.checked);
+    samplesList.querySelectorAll('.sample-card').forEach(card => {
+      const box = card.querySelector('.sample-check');
+      card.classList.toggle('picked', Boolean(box && box.checked));
+    });
+    deleteSelectedBtn.disabled = checked.length === 0;
+    deleteSelectedBtn.textContent = checked.length ? `删除选中（${checked.length}）` : '删除选中';
+    selectAllBtn.disabled = checks.length === 0;
+    selectAllBtn.textContent = checks.length > 0 && checked.length === checks.length ? '取消全选' : '全选';
+  };
+
+  samplesList.addEventListener('change', e => {
+    if (e.target.classList && e.target.classList.contains('sample-check')) updateSampleSelection();
+  });
+
   samplesList.addEventListener('click', e => {
-    const del = e.target.closest('.sample-del');
-    if (del) {
-      e.stopPropagation();
-      deleteSample(del.dataset.del);
-      return;
-    }
+    if (e.target.closest('.sample-pick')) return;
     const card = e.target.closest('.sample-card');
     if (!card) return;
-    document.querySelectorAll('.sample-card').forEach(c => c.classList.remove('selected'));
+    samplesList.querySelectorAll('.sample-card').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
     fetchSample(card.dataset.path, card.dataset.realtime === '1');
   });
 
-  // 已保存剧本默认折叠，点标题行展开/收起，避免几十张卡片把首页拉得过长
-  const samplesToggle = document.getElementById('samplesToggle');
-  const setSamplesExpanded = (open) => {
-    samplesList.hidden = !open;
-    samplesToggle.setAttribute('aria-expanded', String(open));
-    samplesToggle.querySelector('.samples-caret').textContent = open ? '▾' : '▸';
-  };
-  samplesToggle.addEventListener('click', () => setSamplesExpanded(samplesList.hidden));
-  samplesToggle.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSamplesExpanded(samplesList.hidden); }
+  selectAllBtn.addEventListener('click', () => {
+    const checks = sampleChecks();
+    const allChecked = checks.length > 0 && checks.every(c => c.checked);
+    checks.forEach(c => { c.checked = !allChecked; });
+    updateSampleSelection();
   });
-  setSamplesExpanded(false);
-}
 
-async function deleteSample(name) {
-  if (!name) return;
-  if (!confirm(`删除剧本「${name}」？\n该操作会移除 samples/ 下对应目录，不可恢复。`)) return;
-  try {
-    const res = await fetch('/api/samples/' + encodeURIComponent(name), { method: 'DELETE' });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+  if (moreBtn) {
+    const extraCards = Array.from(samplesList.querySelectorAll('.sample-card')).slice(3);
+    let expanded = false;
+    moreBtn.addEventListener('click', () => {
+      expanded = !expanded;
+      extraCards.forEach(card => { card.hidden = !expanded; });
+      moreBtn.textContent = expanded ? '收起' : `查看更多（${extraCards.length}）`;
+    });
+  }
+
+  deleteSelectedBtn.addEventListener('click', async () => {
+    const names = sampleChecks().filter(c => c.checked).map(c => c.value);
+    if (names.length === 0) return;
+    const preview = names.slice(0, 5).map(name => `「${name}」`).join('、');
+    if (!confirm(`删除选中的 ${names.length} 个剧本？\n${preview}${names.length > 5 ? ' 等' : ''}\n\n该操作会移除 samples/ 下对应目录，不可恢复。`)) return;
+
+    deleteSelectedBtn.disabled = true;
+    deleteSelectedBtn.textContent = '正在删除…';
+    const failures = [];
+    for (const name of names) {
+      try {
+        const res = await fetch('/api/samples/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        failures.push(`${name}: ${err.message}`);
+      }
+    }
+    if (failures.length) {
+      alert(`有 ${failures.length} 个剧本删除失败：\n` + failures.slice(0, 8).join('\n'));
     }
     await showHomeScreen();
     await runHomeDecorators();
-  } catch (e) {
-    alert('删除失败: ' + e.message);
-  }
+  });
+
+  updateSampleSelection();
 }
 
 async function fetchSample(path, isRealtime) {
@@ -569,9 +762,14 @@ async function startAiGenerate() {
     location.href = `/game?sid=${sessionId}&mode=realtime`;
 
   } catch(e) {
-    const msg = (e.name === 'AbortError') ? '请求超时，请重试' : e.message;
-    alert('剧本生成失败: ' + msg);
-    showHomeScreen();
+    const msg = (e.name === 'AbortError') ? '请求超时，请重试' : (e.message || '未知错误');
+    app.innerHTML = `
+      <div class="start-screen" style="text-align:center;padding:80px 24px">
+        <h2 style="font-size:24px;margin-bottom:12px">剧本生成失败</h2>
+        <p style="color:var(--danger);margin-bottom:12px;line-height:1.8">${escapeHtml(msg)}</p>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:24px">可以检查右上角「设置」里的 API Key，或稍后重试。</p>
+        <button class="btn btn-primary" onclick="showHomeScreen()">返回首页</button>
+      </div>`;
   } finally {
     btn.disabled = false;
     btn.textContent = '开始创作';

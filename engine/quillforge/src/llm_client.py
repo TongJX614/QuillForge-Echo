@@ -21,13 +21,45 @@ from typing import Generator
 import httpx
 from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 
-from content_guard import moderation_error_or_none
+from content_guard import ContentSafetyError, moderation_error_or_none
 
 import logging
 logger = logging.getLogger(__name__)
 
 # 瞬时错误（网络抖动/限流/服务过载）自动重试，避免上层直接触发昂贵的整段重试
 _TRANSIENT_ERRORS = (APITimeoutError, APIConnectionError, InternalServerError, RateLimitError)
+
+# Key 无效/余额不足这类账号级错误，换模型也没用，不再走备选链
+_FATAL_STATUS = {401, 402, 403}
+
+
+def _parse_model_list(raw: str | None) -> list[str]:
+    return [m.strip() for m in (raw or "").split(",") if m.strip()]
+
+
+def describe_llm_error(error: Exception) -> str:
+    """把服务商异常翻译成用户能看懂的短句（前端错误提示直接展示）。"""
+    if isinstance(error, ContentSafetyError):
+        return error.message
+    status = getattr(error, "status_code", None)
+    if status in (401, 403):
+        return "API Key 无效或没有该模型的权限"
+    if status == 402:
+        return "账户余额不足"
+    if status == 404:
+        return "模型不存在或尚未开通"
+    if status == 429:
+        return "请求过于频繁或额度不足（429）"
+    if isinstance(error, APITimeoutError):
+        return "模型响应超时"
+    if isinstance(error, APIConnectionError):
+        return "无法连接模型服务，请检查网络或 Base URL"
+    return f"{type(error).__name__}: {str(error)[:160]}"
+
+
+def _is_fatal_error(error: Exception) -> bool:
+    return getattr(error, "status_code", None) in _FATAL_STATUS
+
 
 # 项目路径
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # quillforge/
@@ -89,10 +121,19 @@ class LLMClient:
         api_key: str | None = None,
         api_base: str | None = None,
         extra_body: dict | None = None,
+        fallback_models: list[str] | None = None,
     ):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        # 备选模型链：主模型不可用时按顺序自动切换；显式传 model= 时只试该模型
+        if fallback_models is None:
+            fallback_models = _parse_model_list(os.environ.get("DEEPSEEK_FALLBACK_MODELS"))
+        self.fallback_models = [m for m in fallback_models if m and m != model]
+        # 思考模型默认把 token 耗在 reasoning 上（甚至返回空串），统一关闭；
+        # 调用方需要开思考时显式传 extra_body 覆盖。
+        if extra_body is None:
+            extra_body = {"thinking": {"type": "disabled"}}
         self.extra_body = extra_body
 
         resolved_key = _resolve_api_key(api_key)
@@ -130,45 +171,82 @@ class LLMClient:
 
     def generate(self, system_prompt: str, user_prompt: str, model: str = "",
                  max_tokens: int | None = None, temperature: float | None = None) -> str:
-        """调用 LLM 生成文本"""
-        kwargs = {
-            "model": model or self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature if temperature is not None else self.temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
-        }
-        if self.extra_body:
-            kwargs["extra_body"] = {**self.extra_body}
+        """调用 LLM 生成文本；主模型失败时按 DEEPSEEK_FALLBACK_MODELS 自动切换。"""
+        chain = self._model_chain(model)
+        for idx, current_model in enumerate(chain):
+            kwargs = {
+                "model": current_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
+            }
+            if self.extra_body:
+                kwargs["extra_body"] = {**self.extra_body}
 
-        response = self._create_with_retry(kwargs)
-        return response.choices[0].message.content or ""
+            try:
+                response = self._create_with_retry(kwargs)
+                if idx > 0:
+                    logger.warning("[llm_client] 已切换到备选模型 %s 完成请求", current_model)
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                if (isinstance(e, ContentSafetyError) or _is_fatal_error(e)
+                        or idx == len(chain) - 1):
+                    raise
+                logger.warning("[llm_client] 模型 %s 调用失败（%s），切换备选 %s",
+                               current_model, describe_llm_error(e), chain[idx + 1])
 
     def generate_stream(self, system_prompt: str, user_prompt: str, model: str = "",
                         max_tokens: int | None = None, temperature: float | None = None):
-        """调用 LLM 并以流式逐块 yield 输出文本"""
-        kwargs = {
-            "model": model or self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature if temperature is not None else self.temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
-            "stream": True,
-        }
-        if self.extra_body:
-            kwargs["extra_body"] = {**self.extra_body}
+        """调用 LLM 并以流式逐块 yield 输出文本。
 
-        stream = self._create_with_retry(kwargs)
-        for chunk in stream:
-            if not chunk.choices:
+        仅在尚未吐出任何内容时切换到备选模型——已经流出的片段无法撤回，
+        中途失败直接抛给上层，避免前端出现两段拼接内容。
+        """
+        chain = self._model_chain(model)
+        for idx, current_model in enumerate(chain):
+            kwargs = {
+                "model": current_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
+                "stream": True,
+            }
+            if self.extra_body:
+                kwargs["extra_body"] = {**self.extra_body}
+
+            emitted = False
+            try:
+                stream = self._create_with_retry(kwargs)
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta is not None and delta.content:
+                        emitted = True
+                        yield delta.content
+            except Exception as e:
+                if (emitted or isinstance(e, ContentSafetyError) or _is_fatal_error(e)
+                        or idx == len(chain) - 1):
+                    raise
+                logger.warning("[llm_client] 模型 %s 流式调用失败（%s），切换备选 %s",
+                               current_model, describe_llm_error(e), chain[idx + 1])
                 continue
-            delta = chunk.choices[0].delta
-            if delta is not None and delta.content:
-                yield delta.content
+            if not emitted and idx < len(chain) - 1:
+                logger.warning("[llm_client] 模型 %s 返回空内容，切换备选 %s",
+                               current_model, chain[idx + 1])
+                continue
+            return
+
+    def _model_chain(self, model: str = "") -> list[str]:
+        if model:
+            return [model]
+        return [self.model] + [m for m in self.fallback_models if m != self.model]
 
     def generate_json(self, system_prompt: str, user_prompt: str, model: str = "",
                       retries: int = 2, max_tokens: int | None = None,

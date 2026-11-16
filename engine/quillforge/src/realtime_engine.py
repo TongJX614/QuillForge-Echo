@@ -26,7 +26,7 @@ from typing import Generator
 from datetime import date
 from concurrent.futures import ThreadPoolExecutor
 
-from llm_client import LLMClient, extract_json as _extract_json
+from llm_client import LLMClient, extract_json as _extract_json, describe_llm_error
 from logger import get_logger, bind_context, clear_context
 from content_guard import ContentSafetyError, scan_input
 from image_gen import (
@@ -54,7 +54,9 @@ def _build_realtime_client() -> LLMClient:
 
     实时管线优先保障响应速度，必须禁用 thinking（与 Harness 管线一致），
     避免推理模型将 token 预算消耗在 reasoning_content 上导致 JSON 输出截断。
+    前端设置页带了自己的 Key 时优先使用（会话创建于请求线程，context 变量可见）。
     """
+    from provider_key import current_provider_key as _current_provider_key
     model = (
         os.environ.get("SCRIPT_GEN_MODEL")
         or os.environ.get("DEEPSEEK_MODEL")
@@ -69,6 +71,7 @@ def _build_realtime_client() -> LLMClient:
         timeout=75.0,
         connect_timeout=10.0,
         extra_body={"thinking": {"type": "disabled"}},
+        api_key=_current_provider_key() or None,
     )
 
 
@@ -300,6 +303,7 @@ class RealtimeStorySession:
         yield {"type": "progress", "step": "planning", "message": "正在构思故事设定..."}
 
         seed = None
+        seed_err: Exception | None = None
         try:
             chunks = []
             seed_buf = ""
@@ -319,13 +323,15 @@ class RealtimeStorySession:
             else:
                 logger.warning("[realtime] 故事种子解析失败, raw[:200]=%s", raw[:200] if raw else "(empty)")
         except Exception as e:
+            seed_err = e
             logger.error("[realtime] 故事种子生成异常: %s", e)
             if isinstance(e, ContentSafetyError):
                 yield {"type": "error", "message": e.message}
                 return
 
         if not seed:
-            yield {"type": "error", "message": "故事设定生成失败，请重试"}
+            reason = f"：{describe_llm_error(seed_err)}" if seed_err else ""
+            yield {"type": "error", "message": f"故事设定生成失败{reason}，请重试"}
             return
 
         self.seed = seed
@@ -790,6 +796,7 @@ class RealtimeStorySession:
         dlg_done = False
         dlg_early_sent = False  # 当前对象是否已提前推送
         bg_prompt_sent = False
+        stream_err: Exception | None = None
 
         try:
             for chunk in self._client.generate_stream(
@@ -903,11 +910,13 @@ class RealtimeStorySession:
             if isinstance(e, ContentSafetyError):
                 yield {"type": "error", "message": e.message}
                 return
+            stream_err = e
 
         # 解析完整 JSON
         scene = _extract_json(buf)
         if not scene or not scene.get("narration"):
-            yield {"type": "error", "message": "场景生成失败，请重试"}
+            reason = f"：{describe_llm_error(stream_err)}" if stream_err else ""
+            yield {"type": "error", "message": f"场景生成失败{reason}，请重试"}
             return
 
         scene = self._postprocess_scene(scene, scene_idx)
@@ -1315,7 +1324,7 @@ class RealtimeStorySession:
             )
 
     def _realtime_bg_event(self, scene_event: dict, image_gen) -> str | None:
-        """为实时场景生成背景图，返回 asset_bg_ready SSE 事件字符串（失败返回 None）。"""
+        """为实时场景生成背景图，返回 asset_bg_ready SSE 事件字符串（失败也带原因返回）。"""
         script_slug = slugify(self.seed.get("title", "realtime"))
         scene_id = scene_event.get("scene_id", f"scene_{scene_event.get('scene_index', 0)+1:02d}")
         scene_name = scene_event.get("scene_name", scene_id)
@@ -1330,10 +1339,14 @@ class RealtimeStorySession:
             url = image_gen.generate(script_slug, "bg", scene_id, prompt, DEFAULT_BG_SIZE)
             if url:
                 evt = {"event": "asset_bg_ready", "scene_id": scene_id, "scene_name": scene_name, "url": url}
-                return f"event: asset_bg_ready\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
+            else:
+                evt = {"event": "asset_bg_ready", "scene_id": scene_id, "scene_name": scene_name,
+                       "url": None, "status": "fallback",
+                       "reason": image_gen.failure_reason("bg", scene_id)}
+            return f"event: asset_bg_ready\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.warning("[realtime] 背景图生成失败 (scene=%s): %s", scene_id, e)
-        return None
+            return None
 
     def _realtime_tts_events(self, scene_event: dict, tts_gen) -> list[str]:
         """为实时场景中的对话行并行生成 TTS 事件（SSE 字符串列表）。
@@ -1511,7 +1524,7 @@ class RealtimeStorySession:
 
         t.join(timeout=5)
 
-    def stream_assets_sse(self, image_gen, tts_gen=None, image_concurrency: int = 7):
+    def stream_assets_sse(self, image_gen, tts_gen=None, image_concurrency: int = 8):
         """预生成角色立绘和场景背景，yield SSE 事件 dict。
 
         包含 assets_meta / asset_progress / assets_ready / assets_done 事件。
@@ -1556,7 +1569,7 @@ class RealtimeStorySession:
         yield {"event": "assets_meta", "enabled": image_gen.enabled, "total": total,
                "phase1_total": total,
                "message": (f"正在生成角色立绘和场景背景（共 {total} 张）" if image_gen.enabled
-                           else "加载美术素材（缓存模式）")}
+                           else "未配置生图 Key：本轮使用占位图（可在首页「设置」里填写）")}
 
         done_count = 0
         if all_tasks:
@@ -1586,7 +1599,9 @@ class RealtimeStorySession:
                         done_count += 1
                         yield {"event": "asset_progress", "kind": t["kind"], "name": t["name"],
                                "done": done_count, "total": total,
-                               "status": "done" if url else "fallback", "url": url}
+                               "status": "done" if url else "fallback", "url": url,
+                               "reason": ("" if url else
+                                          image_gen.failure_reason(t["cache_kind"], t["cache_id"]))}
                 except concurrent.futures.TimeoutError:
                     logger.warning("[stream_assets_sse] 超时(180s)，跳过未完成任务")
 
