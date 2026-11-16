@@ -149,14 +149,18 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .footer-strip .dots i{width:5px;height:5px;border-radius:50%;background:var(--border-hover)}
 .footer-strip .dots i:first-child{background:var(--accent)}
 @media(max-width:640px){.side-mark{display:none}.case-head .stamp{right:4px!important}}
-/* 已接入项目卡片区（通用样式，不含任何项目专有内容） */
-.project-cards{max-width:1100px;margin:0 auto 40px;padding:0 24px;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
-.project-card{padding:24px;border:1px solid var(--border);border-radius:14px;background:rgba(24,34,52,.6);display:flex;flex-direction:column;gap:10px}
-.project-card-kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:2.5px;color:var(--accent)}
-.project-card-title{font-family:var(--font-serif);font-size:22px;letter-spacing:2px;color:var(--text-strong)}
-.project-card-lead{font-size:13px;color:var(--muted);line-height:1.7;flex:1}
-.project-card-entry{align-self:flex-start;padding:8px 18px;border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-size:13px;text-decoration:none}
-.project-card-entry:hover{background:rgba(111,168,160,.12)}
+/* 已接入项目示例区：引擎只提供容器与版式位置，内容样式由项目自带 */
+.project-showcase{margin:0 0 40px}
+/* 已保存剧本：默认折叠，标题行可点击展开 */
+.samples-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:10px}
+.samples-toggle:hover{color:var(--text-strong)}
+.samples-count{font-family:var(--font-mono);font-size:11px;color:var(--accent);border:1px solid rgba(111,168,160,.35);border-radius:8px;padding:1px 8px}
+.samples-caret{font-size:12px;color:var(--muted);transition:transform .15s}
+/* 单张剧本卡的删除按钮：默认半隐，悬停卡片时显现 */
+.sample-card{position:relative}
+.sample-del{position:absolute;top:10px;right:10px;width:22px;height:22px;line-height:20px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;opacity:0;transition:opacity .15s,border-color .15s,color .15s}
+.sample-card:hover .sample-del,.sample-del:focus-visible{opacity:1}
+.sample-del:hover{color:var(--danger);border-color:var(--danger)}
 </style>
 </head>
 <body>
@@ -173,10 +177,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 </div>
 
 <div class="container" id="app"></div>
-
-<!-- 已接入项目卡片区：内容由 /api/projects 提供，未接入任何项目时整块隐藏。
-     引擎自身不认识任何具体项目，卡片的文案与脚本全部来自注册表。 -->
-<div class="project-cards" id="projectCards" hidden></div>
 
 <script>
 const API = '';
@@ -203,6 +203,7 @@ async function showHomeScreen() {
 
   const sampleCards = samples.map((s, idx) => `
     <div class="sample-card" data-idx="${idx}" data-path="${s.path}" data-realtime="${s.is_realtime ? '1' : ''}" data-evidence="EVID-${String(idx + 1).padStart(2, '0')}">
+      <button class="sample-del" data-del="${escapeHtml(s.filename)}" title="删除该剧本" aria-label="删除该剧本">✕</button>
       <div class="title">${escapeHtml(s.title || s.filename)}${s.is_realtime ? '<span class="rt-badge">实时</span>' : ''}</div>
       <div class="info">${escapeHtml(s.worldline || '')} · ${s.total_scenes || 0} 个场景</div>
       <div class="tags">${(s.characters||[]).map(c=>`<span class="tag">${escapeHtml(c)}</span>`).join('')}</div>
@@ -254,8 +255,13 @@ async function showHomeScreen() {
       <input type="file" id="folderInput" class="file-input" webkitdirectory multiple>
     </div>
 
-    <div class="section-label">已保存剧本 · Saved Cases</div>
-    <div class="samples" id="samplesList">${sampleCards || '<p style="color:var(--muted)">暂无剧本</p>'}</div>
+    <!-- 已接入项目的示例入口。容器与位置由引擎提供（在已保存剧本之上），
+         具体内容由项目脚本经 __qfHomeDecorators 填充；未接入项目时保持隐藏，
+         首页版式与上游一致。 -->
+    <section class="project-showcase" id="projectShowcase" hidden></section>
+
+    <div class="section-label samples-toggle" id="samplesToggle" role="button" tabindex="0" aria-expanded="false">已保存剧本 · Saved Cases<span class="samples-count">${samples.length}</span><span class="samples-caret">▸</span></div>
+    <div class="samples" id="samplesList" hidden>${sampleCards || '<p style="color:var(--muted)">暂无剧本</p>'}</div>
     <div class="footer-strip">
       <span>QUILLFORGE · NARRATIVE ENGINE v6.0.0</span>
       <div class="dots"><i></i><i></i><i></i></div>
@@ -348,13 +354,49 @@ async function showHomeScreen() {
   folderIn.addEventListener('change', e => { if(e.target.files.length > 0) uploadFolder(e.target.files); });
 
   // Sample card clicks — use event delegation
-  document.getElementById('samplesList').addEventListener('click', e => {
+  const samplesList = document.getElementById('samplesList');
+  samplesList.addEventListener('click', e => {
+    const del = e.target.closest('.sample-del');
+    if (del) {
+      e.stopPropagation();
+      deleteSample(del.dataset.del);
+      return;
+    }
     const card = e.target.closest('.sample-card');
     if (!card) return;
     document.querySelectorAll('.sample-card').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
     fetchSample(card.dataset.path, card.dataset.realtime === '1');
   });
+
+  // 已保存剧本默认折叠，点标题行展开/收起，避免几十张卡片把首页拉得过长
+  const samplesToggle = document.getElementById('samplesToggle');
+  const setSamplesExpanded = (open) => {
+    samplesList.hidden = !open;
+    samplesToggle.setAttribute('aria-expanded', String(open));
+    samplesToggle.querySelector('.samples-caret').textContent = open ? '▾' : '▸';
+  };
+  samplesToggle.addEventListener('click', () => setSamplesExpanded(samplesList.hidden));
+  samplesToggle.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSamplesExpanded(samplesList.hidden); }
+  });
+  setSamplesExpanded(false);
+}
+
+async function deleteSample(name) {
+  if (!name) return;
+  if (!confirm(`删除剧本「${name}」？\n该操作会移除 samples/ 下对应目录，不可恢复。`)) return;
+  try {
+    const res = await fetch('/api/samples/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    await showHomeScreen();
+    await runHomeDecorators();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
 }
 
 async function fetchSample(path, isRealtime) {
@@ -700,23 +742,6 @@ function loadScript(src) {
   });
 }
 
-function renderProjectCards(cards) {
-  const mount = document.getElementById('projectCards');
-  if (!mount || !cards.length) return;
-  mount.innerHTML = cards.map((card) => {
-    const entry = safePath(card.entryPath);
-    return [
-      '<section class="project-card" data-project="' + escapeText(card.project) + '">',
-      card.kicker ? '<div class="project-card-kicker">' + escapeText(card.kicker) + '</div>' : '',
-      '<h2 class="project-card-title">' + escapeText(card.title) + '</h2>',
-      card.lead ? '<p class="project-card-lead">' + escapeText(card.lead) + '</p>' : '',
-      entry ? '<a class="project-card-entry" href="' + escapeText(entry) + '">进入</a>' : '',
-      '</section>',
-    ].join('');
-  }).join('');
-  mount.hidden = false;
-}
-
 function applyPageAssets(assets) {
   if (!assets) return;
   (assets.styles || []).map(safePath).filter(Boolean).forEach((href) => {
@@ -727,6 +752,21 @@ function applyPageAssets(assets) {
   });
 }
 
+// 首页渲染完成后交给已接入项目装饰（例如填充「示例项目」区）。
+// 引擎只提供 #projectShowcase 容器与调用时机，不理解装饰内容。
+window.__qfHomeDecorators = [];
+
+async function runHomeDecorators() {
+  for (const decorate of window.__qfHomeDecorators) {
+    if (typeof decorate !== 'function') continue;
+    try {
+      await decorate();
+    } catch (err) {
+      console.error('[home-decorator] 装饰首页失败', err);
+    }
+  }
+}
+
 async function bootHomePage() {
   let data = null;
   try {
@@ -735,14 +775,17 @@ async function bootHomePage() {
   } catch { /* 取不到注册表就按无项目运行 */ }
 
   const cards = (data && data.cards) || [];
-  applyPageAssets(data && data.pageAssets && data.pageAssets['/']);
-  renderProjectCards(cards);
+  const homeAssets = (data && data.pageAssets && data.pageAssets['/']) || null;
+  applyPageAssets(homeAssets);
 
   // 顺序加载，保证后面的脚本能依赖前面脚本注册的全局对象
   for (const card of cards) {
     for (const src of (card.scripts || []).map(safePath).filter(Boolean)) {
       await loadScript(src);
     }
+  }
+  for (const src of ((homeAssets && homeAssets.scripts) || []).map(safePath).filter(Boolean)) {
+    await loadScript(src);
   }
 
   if (projectViewImpl && typeof projectViewImpl.bootstrap === 'function') {
@@ -752,7 +795,8 @@ async function bootHomePage() {
       console.error('[project-view] 接管首页失败，回退引擎首页', err);
     }
   }
-  showHomeScreen();
+  await showHomeScreen();
+  await runHomeDecorators();
 }
 
 bootHomePage();

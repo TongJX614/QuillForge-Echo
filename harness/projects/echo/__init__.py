@@ -47,6 +47,8 @@ def register(registry) -> None:
             "launchMode": echo.launch_mode,
             "enabled": echo.enabled,
         },
+        # 这两个剧本包是节拍的骨架内容，首页的删除按钮对它们无效
+        protected_samples=("回响-DEMO", "索尔维"),
     ))
 
     registry.register_router(PROJECT_NAME, debate_routes.router)
@@ -94,9 +96,14 @@ def register(registry) -> None:
         ),
     ))
 
-    # 世界编织视图的样式注入引擎首页
+    # 世界编织视图的样式注入引擎首页；示例项目卡片（样式 + 脚本）同样注入首页，
+    # 由引擎在渲染完首页后调用 __qfHomeDecorators 时填充 #projectShowcase。
     registry.register_page_assets(PROJECT_NAME, "/", PageAssets(
-        styles=(f"{STATIC_URL_PREFIX}/echo-project-two-view.css",),
+        styles=(
+            f"{STATIC_URL_PREFIX}/echo-project-two-view.css",
+            f"{STATIC_URL_PREFIX}/echo-project-showcase.css",
+        ),
+        scripts=(f"{STATIC_URL_PREFIX}/echo-project-showcase.js",),
     ))
 
     registry.register_interlude(PROJECT_NAME, InterludeSpec(

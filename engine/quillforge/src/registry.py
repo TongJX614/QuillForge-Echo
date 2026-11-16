@@ -106,13 +106,18 @@ class ProcessSpec:
 
 @dataclass(frozen=True)
 class ProjectDescriptor:
-    """一个已注册项目的元信息。"""
+    """一个已注册项目的元信息。
+
+    protected_samples 是该项目声明「正在使用、不得从首页删除」的剧本目录名
+    （相对引擎 samples/）。删除接口据此拒绝，避免删掉别的项目的骨架内容。
+    """
 
     name: str
     label: str = ""
     description: str = ""
     home: Optional[Path] = None
     settings: Mapping[str, Any] = field(default_factory=dict)
+    protected_samples: tuple = ()
 
 
 class ProjectRegistry:
@@ -217,6 +222,20 @@ class ProjectRegistry:
     def settings_for(self, project: str) -> dict[str, Any]:
         descriptor = self._projects.get(project)
         return dict(descriptor.settings) if descriptor else {}
+
+    def protected_samples(self) -> set[str]:
+        """所有项目声明的受保护剧本目录名。"""
+        out: set[str] = set()
+        for descriptor in self._projects.values():
+            out.update(descriptor.protected_samples)
+        return out
+
+    def is_sample_protected(self, name: str) -> bool:
+        """name 本身受保护，或是某个受保护目录的上级，都算受保护。"""
+        for protected in self.protected_samples():
+            if name == protected or protected.startswith(f"{name}/"):
+                return True
+        return False
 
 
 _registry: Optional[ProjectRegistry] = None

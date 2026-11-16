@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Annotated
+import shutil
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from generic_adapter import GenericScriptAdapter, load_story
+from registry import get_registry
 from runtime_paths import ensure_runtime_paths, resolve_runtime_paths
 from session_manager import GameSession
 from dependencies import (
@@ -24,6 +26,9 @@ from dependencies import (
     uploaded_scripts,
 )
 from script_registry import get_ready_script
+from logger import get_logger
+
+logger = get_logger("routes.upload")
 
 router = APIRouter(tags=["upload"])
 limiter = Limiter(key_func=get_remote_address)
@@ -304,3 +309,35 @@ def start_game(
             response=stored_response,
         )
         return deepcopy(stored_response)
+
+
+@router.delete("/api/samples/{name}", summary="删除一个已保存剧本目录")
+def delete_sample(name: str) -> dict:
+    """删除 samples/ 下的一个剧本目录，操作不可逆，前端须先确认。
+
+    只接受单层目录名：不含路径分隔符、不以点开头；解析后必须仍落在
+    samples/ 之内。被已接入项目声明为受保护的目录拒绝删除，避免删掉
+    别的项目的骨架内容。
+    """
+    if not name or name in (".", "..") or name.startswith("."):
+        raise HTTPException(400, "非法的剧本名")
+    if "/" in name or "\\" in name:
+        raise HTTPException(400, "非法的剧本名")
+
+    root = SAMPLES_DIR.resolve()
+    target = (root / name).resolve()
+    if target.parent != root or not target.is_dir():
+        raise HTTPException(404, "剧本不存在")
+    if get_registry().is_sample_protected(name):
+        raise HTTPException(409, "该剧本正被已接入项目使用，不能删除")
+
+    # 摘掉指向该目录的已登记剧本，避免删除后仍残留可用句柄
+    for script_id in list(uploaded_scripts):
+        record_path = uploaded_scripts[script_id].get("path")
+        if record_path is not None and Path(str(record_path)).resolve() == target:
+            uploaded_scripts.pop(script_id, None)
+    _loaded_stories.clear()
+
+    shutil.rmtree(target)
+    logger.info("[upload] 已删除剧本目录: %s", target)
+    return {"ok": True, "deleted": name}
