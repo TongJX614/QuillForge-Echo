@@ -653,63 +653,109 @@ async function api(path, opts={}) {
   return res.json();
 }
 
-showHomeScreen();
+// 首页渲染推迟到下方的项目引导流程：未接入任何项目时等价于直接调用。
 </script>
 <script>
-// 通用项目卡片加载：向 /api/projects 取注册表内容，渲染卡片并按序注入项目脚本。
-// 引擎不理解脚本内容，只负责插入；未接入任何项目时该区块保持隐藏。
-(function () {
+// ═══════════════════════════════════════════════════════
+// 已接入项目的首页引导
+//
+// 引擎只做三件事：渲染注册表给出的卡片、按序注入项目声明的样式与脚本、
+// 然后问项目要不要接管首页。项目不接管（或未接入任何项目）时渲染引擎自己
+// 的首页，行为与上游一致。
+// ═══════════════════════════════════════════════════════
+
+let projectViewImpl = null;
+
+window.__qfPageHost = {
+  api,
+  escapeHtml,
+  showHomeScreen,
+  headerMetaEl() { return document.getElementById('headerMeta'); },
+  appEl() { return document.getElementById('app'); },
+};
+
+window.__qfProjectView = {
+  register(impl) { projectViewImpl = impl || null; },
+};
+
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeText(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+}
+
+// 只接受站内绝对路径，挡掉 javascript: 之类的伪协议
+function safePath(value) {
+  const text = String(value == null ? '' : value);
+  return text.startsWith('/') && !text.startsWith('//') ? text : '';
+}
+
+function loadScript(src) {
+  return new Promise((resolve) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.async = false;
+    el.onload = () => resolve(true);
+    el.onerror = () => resolve(false);
+    document.body.appendChild(el);
+  });
+}
+
+function renderProjectCards(cards) {
   const mount = document.getElementById('projectCards');
-  if (!mount) return;
+  if (!mount || !cards.length) return;
+  mount.innerHTML = cards.map((card) => {
+    const entry = safePath(card.entryPath);
+    return [
+      '<section class="project-card" data-project="' + escapeText(card.project) + '">',
+      card.kicker ? '<div class="project-card-kicker">' + escapeText(card.kicker) + '</div>' : '',
+      '<h2 class="project-card-title">' + escapeText(card.title) + '</h2>',
+      card.lead ? '<p class="project-card-lead">' + escapeText(card.lead) + '</p>' : '',
+      entry ? '<a class="project-card-entry" href="' + escapeText(entry) + '">进入</a>' : '',
+      '</section>',
+    ].join('');
+  }).join('');
+  mount.hidden = false;
+}
 
-  const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  function escapeText(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+function applyPageAssets(assets) {
+  if (!assets) return;
+  (assets.styles || []).map(safePath).filter(Boolean).forEach((href) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+  });
+}
+
+async function bootHomePage() {
+  let data = null;
+  try {
+    const response = await fetch('/api/projects', { headers: { Accept: 'application/json' } });
+    if (response.ok) data = await response.json();
+  } catch { /* 取不到注册表就按无项目运行 */ }
+
+  const cards = (data && data.cards) || [];
+  applyPageAssets(data && data.pageAssets && data.pageAssets['/']);
+  renderProjectCards(cards);
+
+  // 顺序加载，保证后面的脚本能依赖前面脚本注册的全局对象
+  for (const card of cards) {
+    for (const src of (card.scripts || []).map(safePath).filter(Boolean)) {
+      await loadScript(src);
+    }
   }
 
-  // 只接受站内绝对路径，挡掉 javascript: 之类的伪协议
-  function safePath(value) {
-    const text = String(value == null ? '' : value);
-    return text.startsWith('/') && !text.startsWith('//') ? text : '';
+  if (projectViewImpl && typeof projectViewImpl.bootstrap === 'function') {
+    try {
+      if (await projectViewImpl.bootstrap()) return;
+    } catch (err) {
+      console.error('[project-view] 接管首页失败，回退引擎首页', err);
+    }
   }
+  showHomeScreen();
+}
 
-  function loadScript(src) {
-    return new Promise((resolve) => {
-      const el = document.createElement('script');
-      el.src = src;
-      el.async = false;
-      el.onload = () => resolve(true);
-      el.onerror = () => resolve(false);
-      document.body.appendChild(el);
-    });
-  }
-
-  fetch('/api/projects', { headers: { Accept: 'application/json' } })
-    .then((response) => (response.ok ? response.json() : null))
-    .then(async (data) => {
-      const cards = (data && data.cards) || [];
-      if (!cards.length) return;
-      mount.innerHTML = cards.map((card) => {
-        const entry = safePath(card.entryPath);
-        return [
-          '<section class="project-card" data-project="' + escapeText(card.project) + '">',
-          card.kicker ? '<div class="project-card-kicker">' + escapeText(card.kicker) + '</div>' : '',
-          '<h2 class="project-card-title">' + escapeText(card.title) + '</h2>',
-          card.lead ? '<p class="project-card-lead">' + escapeText(card.lead) + '</p>' : '',
-          entry ? '<a class="project-card-entry" href="' + escapeText(entry) + '">进入</a>' : '',
-          '</section>',
-        ].join('');
-      }).join('');
-      mount.hidden = false;
-      // 顺序加载，保证后面的脚本能依赖前面脚本注册的全局对象
-      for (const card of cards) {
-        for (const src of (card.scripts || []).map(safePath).filter(Boolean)) {
-          await loadScript(src);
-        }
-      }
-    })
-    .catch(() => { /* 取不到注册表就保持隐藏，不影响引擎自身页面 */ });
-})();
+bootHomePage();
 </script>
 </body>
 </html>

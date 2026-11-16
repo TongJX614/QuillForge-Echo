@@ -79,7 +79,8 @@ def register(registry) -> None:
     ))
 
     # embed-bridge 在被 iframe 嵌入时负责与宿主游戏通信；
-    # project-two-entry 承载「世界编织」的主题/角色选择与世界书审阅入口。
+    # project-two-entry 是「世界编织」的入口状态机（纯逻辑，无 DOM）；
+    # project-two-view 是它在引擎首页的视图实现，依赖前两者，故排在最后。
     registry.register_card(PROJECT_NAME, ProjectCard(
         project=PROJECT_NAME,
         title="项目二 · 世界编织",
@@ -89,7 +90,13 @@ def register(registry) -> None:
         scripts=(
             f"{STATIC_URL_PREFIX}/echo-embed-bridge.js",
             f"{STATIC_URL_PREFIX}/echo-project-two-entry.js",
+            f"{STATIC_URL_PREFIX}/echo-project-two-view.js",
         ),
+    ))
+
+    # 世界编织视图的样式注入引擎首页
+    registry.register_page_assets(PROJECT_NAME, "/", PageAssets(
+        styles=(f"{STATIC_URL_PREFIX}/echo-project-two-view.css",),
     ))
 
     registry.register_interlude(PROJECT_NAME, InterludeSpec(

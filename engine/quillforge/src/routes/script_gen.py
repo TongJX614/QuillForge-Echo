@@ -47,8 +47,10 @@ async def api_generate_script(body: GenerateScriptRequest):
                     try:
                         record = register_generated_script(script_id, script_path, SAMPLES_DIR)
                     except Exception as error:
-                        # 只透出稳定的错误码，不把内部路径/异常文本回给客户端
-                        logger.warning("[script_gen] registry rejection: %s", type(error).__name__)
+                        # 只透出稳定的错误码，不把内部路径/异常文本回给客户端；
+                        # 具体原因（含 ScriptRegistryError.code）只进服务端日志
+                        logger.warning("[script_gen] registry rejection: %s code=%s",
+                                       type(error).__name__, getattr(error, "code", None) or error)
                         err = json.dumps(
                             {
                                 "type": "error",

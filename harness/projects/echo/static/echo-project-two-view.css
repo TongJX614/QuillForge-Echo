@@ -1,0 +1,19 @@
+/* ECHO 世界编织（项目二）在引擎首页的视图样式，注入 / 页面。 */
+.project-two-shell{max-width:760px;margin:26px auto;padding:30px;border:1px solid var(--border);border-radius:16px;background:rgba(24,34,52,.72);box-shadow:0 18px 50px rgba(0,0,0,.2)}
+.project-two-kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:2.5px;color:var(--accent);margin-bottom:10px}
+.project-two-title{font-family:var(--font-serif);font-size:28px;font-weight:400;letter-spacing:3px;color:var(--text-strong);margin-bottom:8px}
+.project-two-lead{font-size:13px;color:var(--muted);margin-bottom:24px}
+.project-two-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.project-two-field{padding:14px;border:1px solid var(--border);border-radius:10px;background:rgba(16,24,38,.55)}
+.project-two-field.wide{grid-column:1/-1}
+.project-two-field .label{font-family:var(--font-mono);font-size:10px;letter-spacing:1.4px;color:var(--muted);margin-bottom:6px}
+.project-two-field .value{color:var(--text-strong);white-space:pre-wrap;overflow-wrap:anywhere}
+.project-two-review{margin:20px 0;padding:20px;border-left:3px solid var(--action);border-radius:8px;background:rgba(111,168,160,.08)}
+.project-two-review h3{font-size:18px;color:var(--text-strong);margin-bottom:12px}
+.project-two-review pre{font:inherit;line-height:1.85;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.project-two-note{font-size:12px;color:var(--muted);margin-top:12px}
+.project-two-status{display:flex;align-items:center;gap:10px;padding:16px;margin:16px 0;border:1px dashed var(--border-hover);border-radius:10px;color:var(--text)}
+.project-two-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.project-two-secondary{background:transparent;border:1px solid var(--border-hover);color:var(--text)}
+.project-two-secondary:hover{border-color:var(--action);color:var(--action)}
+.project-two-error{color:var(--danger)}

@@ -47,6 +47,10 @@ def _build_script_gen_client() -> LLMClient:
     剧本生成使用轻量模型（flash），不受 .env 中 DEEPSEEK_MODEL 影响；
     可通过 SCRIPT_GEN_MODEL 环境变量覆盖，默认 deepseek-v4-flash。
     游戏运行时对话仍走 .env 配置的模型（如 v4-pro）。
+
+    必须禁用 thinking，与 Harness 管线（sut.py）和实时管线（realtime_engine.py）
+    保持一致：思考模型会把 max_tokens 耗尽在 reasoning 上，正式输出为空，
+    而本模块的 Step 1A/1B 解析到空串时只会静默返回 None。
     """
     model = os.environ.get("SCRIPT_GEN_MODEL", "deepseek-v4-flash")
     return LLMClient(
@@ -55,6 +59,7 @@ def _build_script_gen_client() -> LLMClient:
         max_tokens=8000,
         timeout=120.0,
         connect_timeout=10.0,
+        extra_body={"thinking": {"type": "disabled"}},
     )
 
 
@@ -241,6 +246,60 @@ def _validate_yaml(content: str) -> bool:
 # ID 一致性校验
 # ═══════════════════════════════════════════════════════
 
+def _link_critical_choices(step2: dict[str, str]) -> dict[str, str]:
+    """将关键选择按 scene_id 回写到场景的 critical_choice 字段。
+
+    LLM 不保证主动填写 critical_choice，若不连线则 get_scene_choices
+    返回空：剧本选项退化为 LLM 现场生成，小游戏随机注入也随之失效。
+    后端确定性连线，保证生成剧本与上传剧本走同一选项链路。
+    """
+    choices_yaml = step2.get("关键选择.yaml", "")
+    scenes_yaml = step2.get("场景清单.yaml", "")
+    try:
+        choices_data = yaml.safe_load(choices_yaml)
+        scenes_data = yaml.safe_load(scenes_yaml)
+    except Exception as e:
+        logger.warning("[script_gen] 连线解析失败，跳过: %s", e)
+        return step2
+    if not isinstance(choices_data, dict) or not isinstance(scenes_data, dict):
+        return step2
+
+    # scene_id → choice_id（同一场景多个选择时取第一个）
+    scene_to_choice: dict[str, str] = {}
+    for ch in choices_data.get("choices", []) or []:
+        if not isinstance(ch, dict):
+            continue
+        sid = str(ch.get("scene_id", "")).strip()
+        cid = str(ch.get("id", "")).strip()
+        if sid and cid and sid not in scene_to_choice:
+            scene_to_choice[sid] = cid
+    if not scene_to_choice:
+        return step2
+
+    linked = 0
+    for scene in scenes_data.get("scenes", []) or []:
+        if not isinstance(scene, dict):
+            continue
+        cid = scene_to_choice.get(str(scene.get("id", "")).strip())
+        if not cid:
+            continue
+        # 以 scene_id 匹配为准强制写入：LLM 可能把 critical_choice 写成
+        # 描述性文本而非 choice id，会导致 get_scene_choices 查不到选项
+        if str(scene.get("critical_choice", "")).strip() != cid:
+            scene["critical_choice"] = cid
+            linked += 1
+        # 有关键选择的场景必须标记为分支点，供前端/适配层识别
+        scene["branching_point"] = True
+
+    if linked:
+        step2 = dict(step2)
+        step2["场景清单.yaml"] = yaml.dump(
+            scenes_data, allow_unicode=True, default_flow_style=False, sort_keys=False
+        )
+        logger.info("[script_gen] critical_choice 连线完成: %d 个场景", linked)
+    return step2
+
+
 def _fix_character_refs(step1: dict[str, str], step2: dict[str, str]) -> dict[str, str]:
     """校验场景清单中 characters_present 引用的角色 ID 是否都在主要角色.yaml 中定义。
     不匹配时尝试自动替换为最接近的已定义 ID；无法匹配的保留原样（adapter 层会兜底）。
@@ -387,6 +446,8 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
                 files = _parse_files_output(raw)
                 if "剧本元数据.yaml" in files and _validate_yaml(files["剧本元数据.yaml"]):
                     return files
+                logger.warning("Step 1A attempt %d/%d 输出不可用: 长度=%d 解析到=%s",
+                               attempt + 1, max_retries, len(raw or ""), list(files.keys()))
             except ContentSafetyError:
                 raise
             except Exception as e:
@@ -404,6 +465,8 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
                 files = _parse_files_output(raw)
                 if "主要角色.yaml" in files and _validate_yaml(files["主要角色.yaml"]):
                     return files
+                logger.warning("Step 1B attempt %d/%d 输出不可用: 长度=%d 解析到=%s",
+                               attempt + 1, max_retries, len(raw or ""), list(files.keys()))
             except ContentSafetyError:
                 raise
             except Exception as e:
@@ -540,10 +603,14 @@ def generate_script(user_input: str, max_retries: int = 1) -> Generator[dict, No
     yield {"type": "progress", "step": "validate", "message": "正在校验角色引用一致性..."}
     step2_output = _fix_character_refs(step1_output, step2_output)
 
+    yield {"type": "progress", "step": "link", "message": "正在绑定关键选择与场景..."}
+    step2_output = _link_critical_choices(step2_output)
+
     # ─── 写入磁盘 ───
     yield {"type": "progress", "step": "saving", "message": "正在保存剧本..."}
 
-    script_id = str(uuid.uuid4())[:8]
+    # script_registry 要求 script_id 为 32 位十六进制，故用完整 uuid4().hex
+    script_id = uuid.uuid4().hex
     # 清理标题中的非法路径字符
     safe_title = re.sub(r'[<>:"/\\|?*]', '', title).strip() or "未命名剧本"
     script_dir = SAMPLES_DIR / safe_title
