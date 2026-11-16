@@ -164,7 +164,7 @@ class NarrativeSUT:
         # 使用统一 LLM 客户端，从配置文件读取参数；前端设置页带了自己的 Key 时优先使用
         from provider_key import current_provider_key
         self.llm = LLMClient(
-            model=os.environ.get("DEEPSEEK_MODEL") or llm_cfg.get("model", "deepseek-chat"),
+            model=os.environ.get("DEEPSEEK_MODEL") or llm_cfg.get("model", "deepseek-v4.1-flash-1017"),
             temperature=llm_cfg.get("temperature", 0.8),
             max_tokens=llm_cfg.get("maxTokens", 3000),
             timeout=timeout_s,

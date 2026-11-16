@@ -577,3 +577,56 @@ class TestPersonalitySeverityAndJudge:
         result = validator.check_personality_match([make_dialogue("角色A", "台词")])
         assert result.passed is True  # 退回启发式中性分
         assert result.score >= 0.5
+
+
+# ═══════════════════════════════════════════════════════
+# 第 9 项：剧本外实体检测
+# ═══════════════════════════════════════════════════════
+
+class TestScriptEntityFidelity:
+    """实体保真检查：拦住真越界，不误伤普通叙述短语。"""
+
+    def _validator(self):
+        return NarrativeValidator(
+            make_context([make_char("角色A"), make_char("角色B")]),
+            allowed_entities="角色A\n角色B\n记忆工坊\n织星塔",
+            script_scene_raw="苏然回到记忆工坊，窗外是织星塔。工坊位于新深圳旧城区的一栋改造公寓楼顶层。",
+            script_global_raw="织女号空间站曾经在轨道上运行。",
+        )
+
+    def _check(self, text: str):
+        return self._validator().check_script_entity_fidelity(
+            text,
+            [make_dialogue("角色A", "台词")],
+            [make_choice("继续调查", "推进")],
+        )
+
+    def test_sentence_fragments_are_not_entities(self):
+        texts = [
+            "她越过你的肩膀望向酒店门口。",
+            "那东西像一根钉进这座城的钉子。",
+            "那艘早就退役封锁的空间站仍在轨道上。",
+        ]
+        for text in texts:
+            assert self._check(text).passed is True, text
+
+    def test_worldbook_entity_inside_verb_phrase_is_allowed(self):
+        result = self._check("来源标注是织女号空间站的回收数据。")
+        assert result.passed is True
+
+    def test_known_entity_is_allowed(self):
+        assert self._check("她回到记忆工坊，打开织星塔的终端。").passed is True
+
+    def test_grounded_location_paraphrase_is_allowed(self):
+        result = self._check("深夜两点，旧城区顶层的工坊里只剩仪器低鸣。")
+        assert result.passed is True
+
+    def test_unknown_named_entity_blocks(self):
+        result = self._check("这是天网空间站传来的信号。")
+        assert result.passed is False
+        assert "天网空间站" in result.detail
+
+    def test_unknown_place_blocks(self):
+        result = self._check("他们抵达了布鲁塞尔中央车站。")
+        assert result.passed is False
+        assert "布鲁塞尔中央车站" in result.detail

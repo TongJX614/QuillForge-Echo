@@ -12,10 +12,11 @@ LLM 只负责内容创作；破绽 HTML 标记与 delay/duration/yPos/angle 等
 from __future__ import annotations
 
 import html
-import os
 
 from llm_client import LLMClient
 from logger import get_logger
+
+from .settings import llm_model
 
 logger = get_logger("debate_generator")
 
@@ -27,12 +28,12 @@ logger = get_logger("debate_generator")
 def _build_debate_client() -> LLMClient:
     """构建辩论生成专用 LLM 客户端。
 
-    与剧本生成同理使用轻量模型，不受 .env 中 DEEPSEEK_MODEL 影响；
-    可通过 DEBATE_MODEL 环境变量覆盖，默认 deepseek-v4-flash。
+    与剧本生成同理使用轻量模型，默认跟随 DEEPSEEK_MODEL；
+    可通过 DEBATE_MODEL 环境变量单独覆盖。
     必须禁用 thinking：思考模型会把 max_tokens 耗尽在 reasoning 上，
     导致正式输出为空（finish_reason=length 且 content 为空串）。
     """
-    model = os.environ.get("DEBATE_MODEL", "deepseek-v4-flash")
+    model = llm_model("DEBATE_MODEL")
     return LLMClient(
         model=model,
         temperature=0.85,

@@ -31,3 +31,8 @@ generated_images/
 generated_audio/
 output/
 *.log
+
+# 生成的剧本只留在本地，仓库仅保留内置示例
+engine/quillforge/samples/*
+!engine/quillforge/samples/回响-DEMO/
+!engine/quillforge/samples/索尔维/

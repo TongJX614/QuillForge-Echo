@@ -98,7 +98,7 @@ def _resolve_api_base(api_base: str | None = None) -> str:
         from dotenv import load_dotenv
         load_dotenv(WORKSPACE_ROOT / ".env")
         load_dotenv(PROJECT_ROOT / ".env")
-        return os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        return os.environ.get("DEEPSEEK_BASE_URL", "https://maas.qianwenaiapi.com/compatible-mode/v1")
 
 
 class LLMClient:
@@ -113,7 +113,7 @@ class LLMClient:
 
     def __init__(
         self,
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4.1-flash-1017",
         temperature: float = 0.8,
         max_tokens: int = 3000,
         timeout: float = 90.0,

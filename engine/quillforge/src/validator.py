@@ -144,9 +144,22 @@ class NarrativeValidator(Validator):
     GENERIC_PREFIXES = ("这", "那", "某", "一", "整个", "所有", "我们", "他们",
                         "自己", "新的", "旧的", "一座", "一家", "我", "你", "他",
                         "她", "它", "谁", "有", "没", "个", "位", "名")
-    VERB_PREFIXES = ("你走进", "你走入", "你来到", "我走进", "这里是", "那里是",
-                     "走进", "走入", "来到", "回到", "前往", "进入", "抵达",
-                     "穿过", "站在", "坐在", "这是", "那是", "在", "到", "从", "向")
+    # 专有实体里不该出现的虚词、代词和动作词。命中即视为句子碎片，
+    # 避免把「越过你的肩膀望向酒店」「像一根钉进这座城」当成剧本外实体。
+    ENTITY_NOISE_MARKERS = (
+        "的", "了", "着", "过", "是", "我", "你", "他", "她", "它",
+        "这", "那", "就", "像", "又", "还", "也", "都", "把", "被",
+        "让", "使", "望", "看见", "看到", "发现", "走进", "走入",
+        "来到", "站在", "坐在", "越过", "经过", "早就", "早已",
+        "退役", "封锁", "说道", "觉得",
+    )
+    ENTITY_LEADING_NOISE = (
+        "这是", "那是", "还有", "以及", "来到", "走进", "走入", "进入",
+        "抵达", "穿过", "站在", "坐在", "望向", "看向", "发现", "看到",
+        "看见", "越过", "经过", "回到", "前往", "离开", "靠近", "推开",
+        "打开", "是", "像", "在", "从", "向", "到", "了", "着", "过",
+        "又", "还", "也", "都", "就",
+    )
 
     def _extract_entity_candidates(self, text: str) -> list[str]:
         """抽取高置信度的专有实体候选。宁可漏判，不可误判。"""
@@ -162,6 +175,59 @@ class NarrativeValidator(Validator):
         ):
             cands.append(m.group(0))
         return cands
+
+    @classmethod
+    def _split_entity_candidate(cls, cand: str) -> tuple[str, str]:
+        """把候选拆成核心词与实体后缀；无后缀时核心即候选本身。"""
+        # 「空间站」「酒店」本身就是裸后缀，不能再拆成「空间」+「站」，
+        # 否则它会变成放行所有同类专名的白名单。
+        if cand in cls.ENTITY_SUFFIXES or cand in cls.PERSON_TITLES:
+            return cand, ""
+        for suffix in cls.ENTITY_SUFFIXES + cls.PERSON_TITLES:
+            if cand.endswith(suffix) and len(cand) > len(suffix):
+                return cand[: -len(suffix)], suffix
+        return cand, ""
+
+    @classmethod
+    def _clean_entity_core(cls, core: str) -> str:
+        """剥掉候选核心上的标点、前置动词和尾部的「的 / 之」。"""
+        core = core.strip(" \t\n，。！？、；：,.!?;:…—-")
+        changed = True
+        while changed and core:
+            changed = False
+            for prefix in cls.ENTITY_LEADING_NOISE:
+                if core.startswith(prefix) and len(core) > len(prefix) + 1:
+                    core = core[len(prefix):]
+                    changed = True
+                    break
+        while len(core) > 2 and core.endswith(("的", "之")):
+            core = core[:-1]
+        return core
+
+    @classmethod
+    def _has_entity_noise(cls, core: str) -> bool:
+        return any(marker in core for marker in cls.ENTITY_NOISE_MARKERS)
+
+    @staticmethod
+    def _is_corpus_grounded(core: str, corpus: str) -> bool:
+        """核心词能否完全由剧本原文中的连续片段拼出。
+
+        「旧城区顶层工坊」可由「旧城区」「顶层」拼成，属于复述剧本；
+        「天网空间站」的「天网」在原文中不存在，仍应拦截。
+        """
+        if not core or not corpus:
+            return False
+        pos = 0
+        while pos < len(core):
+            matched = 0
+            for end in range(len(core), pos + 1, -1):
+                if core[pos:end] in corpus:
+                    matched = end - pos
+                    break
+            if matched < 2:
+                return False
+            pos += matched
+        return True
 
     def check_script_entity_fidelity(self, narration: str, dialogues: list[Dialogue],
                                      choices: list[Choice]) -> ValidationCheck:
@@ -196,20 +262,26 @@ class NarrativeValidator(Validator):
                     expanded.add(tail)
         allowed_names = sorted(expanded, key=len, reverse=True)
 
+        # 剧本原文里出现过的“核心 + 实体后缀”组合也算已知实体。
+        # 例如世界书写了「织女号空间站」，生成文里的「来源标注是织女号空间站」
+        # 应视为复述剧本，而不是另造实体。只收完整名称，避免把「空间站」
+        # 这种裸后缀当成放行所有空间站的白名单。
+        bare_suffixes = set(self.ENTITY_SUFFIXES) | set(self.PERSON_TITLES)
+        known_names = {n for n in allowed_names if n not in bare_suffixes}
+        for name in self._extract_entity_candidates(corpus):
+            core, suffix = self._split_entity_candidate(name)
+            core = self._clean_entity_core(core)
+            if not suffix or not core or len(core) < 2:
+                continue
+            if self._has_entity_noise(core):
+                continue
+            known_names.add(core + suffix)
+        known_names = sorted(known_names, key=len, reverse=True)
+
         bad: list[str] = []
         for cand in self._extract_entity_candidates(generated):
-            core = cand
-            suffix = ""
-            for s in self.ENTITY_SUFFIXES + self.PERSON_TITLES:
-                if core.endswith(s) and len(core) > len(s):
-                    core = core[: -len(s)]
-                    suffix = s
-                    break
-            # 正则会把动词一起吞进候选（如「你走进玄武门实验室」），剥掉后再判断
-            for p in self.VERB_PREFIXES:
-                if core.startswith(p) and len(core) > len(p) + 1:
-                    core = core[len(p):]
-                    break
+            core, suffix = self._split_entity_candidate(cand)
+            core = self._clean_entity_core(core)
             display = (core + suffix) if suffix else core
             min_core_len = 1 if suffix in self.PERSON_TITLES else 2
             if len(core) < min_core_len or any(core.startswith(p) for p in self.GENERIC_PREFIXES):
@@ -218,11 +290,18 @@ class NarrativeValidator(Validator):
                 continue
             # 正则会把动词一起吞进来（如「你走进记忆工坊」），只要候选里
             # 嵌着剧本已知实体，就说明是在复述剧本而非另造实体。
-            if any(n in cand or core in n or n in core for n in allowed_names):
+            if any(n in cand or core in n or n in core for n in known_names):
                 continue
             if any(n in cand for n in self.character_names):
                 continue
             if core in self.character_names:
+                continue
+            # 剥掉前缀后仍含虚词、代词或动作词，说明是句子碎片，不是专名。
+            if self._has_entity_noise(core):
+                continue
+            # 核心词完全由剧本原文片段拼成，属于对已有地点的复述，
+            # 例如「旧城区顶层工坊」；只有真正新造的专名才拦截。
+            if self._is_corpus_grounded(core, corpus):
                 continue
             bad.append(display)
 

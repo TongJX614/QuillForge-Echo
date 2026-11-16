@@ -8,7 +8,7 @@ AI 实时生成、AI 剧本生成、立绘与背景生图、TTS 语音合成。
 `harness/projects/echo/` 把它挂载为自己的叙事后端；`QUILLFORGE_PROJECTS` 置空时，
 引擎行为与上游 `675c63a` 一致。
 
-> 上游版本线 6.0.0 | 最后更新 2026-11-16 | 引擎测试 367 项
+> 上游版本线 6.0.0 | 最后更新 2026-11-16 | 引擎测试 380 项
 
 ## 在融合仓库中的位置
 
@@ -35,6 +35,9 @@ sh scripts/engine.sh
 
 打开 http://127.0.0.1:8050/ ，API 文档在 `/docs`。`scripts/engine.sh` 会显式清空
 `QUILLFORGE_PROJECTS`，确保以无项目形态启动。
+
+`rembg[cpu]` 是立绘去背的必需依赖，已包含在 `engine/requirements.txt`；首次去背会
+下载 `isnet-anime` 模型。只有安装失败时才会退回纯 PIL 绿幕抠图，并打印警告。
 
 只配置引擎自身、不经过根 `.env` 时：
 
@@ -136,7 +139,7 @@ engine/
     │   ├── tts_gen.py              TTS
     │   ├── realtime_engine.py      实时生成
     │   └── script_generator.py     AI 剧本生成
-    └── tests/                      367 项 pytest
+    └── tests/                      380 项 pytest
 ```
 
 ## API
@@ -174,7 +177,7 @@ engine/
 ## 测试
 
 ```bash
-cd engine && ../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 367
+cd engine && ../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 380
 ```
 
 或在仓库根执行 `sh scripts/test-all.sh` 跑全部套件与跨模块冒烟。`live` 标记的

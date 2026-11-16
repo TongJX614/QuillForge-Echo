@@ -103,7 +103,7 @@ engine/quillforge/
 ├── prompts/                    6 份 Mustache 模板
 ├── config/                     Harness、角色卡、世界线、示例场景
 ├── samples/                    回响-DEMO、索尔维0801
-├── tests/                      367 项 pytest
+├── tests/                      380 项 pytest
 ├── quillforge.md               上游完整技术规格
 ├── server_start.py             交互式启动器
 ├── ../README.md                引擎使用说明
@@ -152,11 +152,15 @@ QUILLFORGE_PROJECTS= PYTHONPATH=src ../../.venv/bin/python src/server.py --host 
 导出为环境变量，因此不需要在 `engine/` 再放一份 Key。模板在
 [../.env.example](../.env.example)。
 
+`rembg[cpu]` 是必需依赖，首次立绘去背会下载 `isnet-anime` 模型；缺失时只作为
+应急回退到纯 PIL 绿幕抠图，并打印警告。安装入口统一为
+`engine/requirements.txt`。
+
 ## 测试
 
 ```bash
 cd engine
-../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 367
+../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 380
 ```
 
 `live` 标记的测试需要真实大模型，默认排除。改动引擎或接入层后，再跑仓库根的

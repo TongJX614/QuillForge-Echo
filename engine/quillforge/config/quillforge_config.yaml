@@ -5,11 +5,10 @@ quillforge:
   version: "3.2.0"
   name: "QuillForge"
 
-  # LLM 配置
+  # LLM 配置（默认千问平台，可用 DEEPSEEK_BASE_URL / DEEPSEEK_MODEL 覆盖）
   llm:
-    # DeepSeek API（OpenAI 兼容格式）
-    apiBase: "https://api.deepseek.com"
-    model: "deepseek-v4-flash"
+    apiBase: "https://maas.qianwenaiapi.com/compatible-mode/v1"
+    model: "deepseek-v4.1-flash-1017"
     temperature: 0.8
     maxTokens: 4000
     timeout: 90000  # 毫秒（代码读取时 ≥1000 按毫秒换算为秒）

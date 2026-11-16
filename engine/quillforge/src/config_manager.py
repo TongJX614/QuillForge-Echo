@@ -29,9 +29,9 @@ class QuillForgeSettings(BaseSettings):
     # ── LLM 配置 ──
     deepseek_api_key: str = Field(default="", alias="DEEPSEEK_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    deepseek_base_url: str = Field(default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL")
-    deepseek_model: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
-    script_gen_model: str = Field(default="deepseek-v4-flash", alias="SCRIPT_GEN_MODEL")
+    deepseek_base_url: str = Field(default="https://maas.qianwenaiapi.com/compatible-mode/v1", alias="DEEPSEEK_BASE_URL")
+    deepseek_model: str = Field(default="deepseek-v4.1-flash-1017", alias="DEEPSEEK_MODEL")
+    script_gen_model: str = Field(default="deepseek-v4.1-flash-1017", alias="SCRIPT_GEN_MODEL")
     llm_fallback_models: str = Field(default="", alias="DEEPSEEK_FALLBACK_MODELS")
 
     # ── LLM 调用参数 ──

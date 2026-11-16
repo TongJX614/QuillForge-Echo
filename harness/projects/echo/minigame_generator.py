@@ -139,8 +139,8 @@ _KIND_TITLES = {
 def _build_minigame_client() -> LLMClient:
     """构建小游戏生成专用 LLM 客户端。
 
-    与剧本生成同理使用轻量模型，不受 .env 中 DEEPSEEK_MODEL 影响；
-    可通过 MINIGAME_MODEL 环境变量覆盖。
+    与剧本生成同理使用轻量模型，默认跟随 DEEPSEEK_MODEL；
+    可通过 MINIGAME_MODEL 环境变量单独覆盖。
     必须禁用 thinking：思考模型会把 max_tokens 耗尽在 reasoning 上，
     导致正式输出为空。
     """

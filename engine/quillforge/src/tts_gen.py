@@ -257,6 +257,115 @@ class TTSGenerator:
                 return "female"
         return ""
 
+    # 性格 / 说话风格对年龄音区的微调词。只决定“优先挑哪一档”，
+    # 最终仍要经过同性别去重，避免两个角色拿到同一个预置音色。
+    TONE_YOUNGER = (
+        "活泼", "跳脱", "俏皮", "天真", "稚气", "顽皮", "机灵", "热血",
+        "冲动", "莽撞", "急躁", "爽朗", "轻快", "语速快", "爱抢话",
+        "玩笑", "挑衅", "好奇",
+    )
+    TONE_OLDER = (
+        "沉稳", "低沉", "威严", "苍老", "老成", "缓慢", "慢条斯理",
+        "冰冷", "冷峻", "沙哑", "厚重", "压迫", "庄重", "优雅",
+        "克制", "理性", "冷静", "平稳", "和蔼", "审视", "控制欲",
+    )
+
+    def _preferred_voice_index(self, char: dict, pool_len: int) -> int:
+        """按年龄选基准音区，再用性格 / 说话风格做一档以内的偏移。"""
+        if pool_len <= 0:
+            return 0
+        age_text = str(char.get("age", "") or "").strip()
+        match = re.search(r"\d+", age_text)
+        if match:
+            age = int(match.group())
+            thresholds = self.age_thresholds
+            if age <= thresholds[0]:
+                idx = 0
+            elif age <= thresholds[1]:
+                idx = 1
+            elif age <= thresholds[2]:
+                idx = 2
+            else:
+                idx = 3
+        else:
+            idx = 1
+        tone_text = " ".join(
+            str(char.get(key, "") or "")
+            for key in ("personality", "speakingStyle", "speaking_style", "voice_tone", "role", "occupation")
+        )
+        younger = sum(1 for kw in self.TONE_YOUNGER if kw in tone_text)
+        older = sum(1 for kw in self.TONE_OLDER if kw in tone_text)
+        if younger >= 2 and older == 0:
+            idx -= min(younger, 3)
+        elif older >= 2 and younger == 0:
+            idx += 1
+        return max(0, min(pool_len - 1, idx))
+
+    @staticmethod
+    def _age_number(char: dict) -> int:
+        match = re.search(r"\d+", str(char.get("age", "") or ""))
+        return int(match.group()) if match else 999
+
+    def _build_voice_assignments(self, characters: list) -> dict[str, str]:
+        """为同一剧本内的角色分配稳定且尽量不重复的预置音色。
+
+        同一性别音色池里，优先按年龄 / 性格挑档；若已被占用，就取最近的
+        空闲档。只有角色数超过音色池容量时才复用。
+        """
+        groups: dict[str, list[tuple[int, int, str, str, list, int]]] = {"male": [], "female": []}
+        explicit: set[str] = set()
+        for idx, char in enumerate(characters or []):
+            if not isinstance(char, dict):
+                continue
+            name = str(char.get("name", "") or "").strip()
+            if not name:
+                continue
+            cid = str(char.get("id", "") or "").strip()
+            voice_sample = str(char.get("voiceSample", "") or char.get("voice_sample", "")).strip()
+            voice_id = str(char.get("voiceId", "") or char.get("voice_id", "")).strip()
+            mapped = self.voice_map.get(name, "")
+            if voice_sample or voice_id or mapped:
+                for value in (voice_id, mapped):
+                    if value:
+                        explicit.add(value)
+                continue
+            gender = self._normalize_gender(char.get("gender", "")) or self._infer_gender(char)
+            if gender not in groups:
+                continue
+            pool = self.voice_male_by_age if gender == "male" else self.voice_female_by_age
+            if not pool:
+                continue
+            groups[gender].append((
+                idx,
+                self._preferred_voice_index(char, len(pool)),
+                name,
+                cid,
+                pool,
+                self._age_number(char),
+            ))
+
+        assignments: dict[str, str] = {}
+        for gender, items in groups.items():
+            if not items:
+                continue
+            pool = items[0][4]
+            used = {v for v in explicit if v in pool}
+            # 低音区同档时先照顾更年轻的角色；高音区同档时先照顾更年长的角色。
+            ordered = sorted(
+                items,
+                key=lambda item: (item[1], item[5] if item[1] <= 1 else -item[5], item[0]),
+            )
+            for _idx, pref, name, cid, _pool, _age in ordered:
+                candidates = sorted(range(len(pool)), key=lambda j: (abs(j - pref), j))
+                slot = next((j for j in candidates if j not in used), pref % len(pool))
+                used.add(slot)
+                voice = pool[slot]
+                assignments[name] = voice
+                if cid:
+                    assignments[cid] = voice
+                logger.debug("[tts_voice] %s → auto[%s] %s (pref=%d)", name, gender, voice, pref)
+        return assignments
+
     def _voice_by_age(self, gender: str, age_str: str) -> Optional[str]:
         """根据性别和年龄返回对应的预置音色名。"""
         gender = self._normalize_gender(gender)
@@ -374,7 +483,19 @@ class TTSGenerator:
             logger.debug("[tts_voice] %s → voice_map: %s", speaker, self.voice_map[speaker])
             return self.voice_map[speaker]
 
-        # 4. 按 gender + age 推断预置音色（gender 缺失时尝试从其他字段推断）
+        # 4. 同一剧本内按性别分组去重：两个男性不会拿到同一个预置音色
+        if characters:
+            assignments = self._build_voice_assignments(characters)
+            if char:
+                for key in (str(char.get("name", "") or "").strip(), str(char.get("id", "") or "").strip()):
+                    if key and key in assignments:
+                        logger.debug("[tts_voice] %s → cast_assign: %s", speaker, assignments[key])
+                        return assignments[key]
+            if speaker in assignments:
+                logger.debug("[tts_voice] %s → cast_assign: %s", speaker, assignments[speaker])
+                return assignments[speaker]
+
+        # 5. 按 gender + age 推断预置音色（gender 缺失时尝试从其他字段推断）
         if char:
             gender = self._normalize_gender(char.get("gender", ""))
             if not gender:
@@ -393,7 +514,7 @@ class TTSGenerator:
                     logger.debug("[tts_voice] %s → female default: %s", speaker, self.default_voice_female)
                     return self.default_voice_female
 
-        # 5. 默认音色
+        # 6. 默认音色
         logger.info("[tts_voice] %s → fallback default: %s (char_matched=%s, chars_count=%d)",
                     speaker, self.default_voice, char is not None, len(characters))
         return self.default_voice

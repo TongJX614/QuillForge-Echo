@@ -33,7 +33,7 @@ engine/quillforge/
 ├── src/registry.py            QUILLFORGE_PROJECTS 项目注册表
 ├── src/runtime_paths.py       QUILLFORGE_VAR_DIR 运行期目录
 ├── src/script_registry.py     生成剧本的可信边界与先审阅后开局
-├── tests/                     367 项 pytest
+├── tests/                     380 项 pytest
 └── samples/                   2 个内置剧本包：回响-DEMO、索尔维0801
 
 harness/projects/echo/
@@ -134,7 +134,7 @@ sh scripts/test-all.sh
 分段：
 
 ```bash
-cd engine && ../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 367
+cd engine && ../.venv/bin/python -m pytest quillforge/tests -q -m "not live"   # 380
 .venv/bin/python -m pytest harness/projects/echo/tests -q                     # 90
 node --test harness/projects/echo/tests_js/*.cjs                              # 18
 cd projects/echo && node --test tests/*.test.mjs                              # 9
@@ -175,8 +175,9 @@ node scripts/integration-smoke.mjs                                            # 
   `IMAGE_PROMPT_EXTEND` / `IMAGE_WATERMARK` 可显式打开。
 - 生图并发：千问 / DashScope 系按 `IMAGE_CONCURRENCY` 真并发，默认 8；其他服务商
   仍串行错峰，避免免费额度 429。
-- 引擎 venv 不装 `rembg` 时，立绘去背景回退到纯 PIL 绿幕抠图，提示词里的
-  「纯绿色背景」必须保留。
+- `rembg[cpu]` 是引擎必需依赖，已写进 `engine/requirements.txt`；首次立绘去背会
+  下载 `isnet-anime` 模型。未安装时只作为应急回退到纯 PIL 绿幕抠图，并打印警告，
+  不要依赖该回退交付；提示词里的「纯绿色背景」仍需保留。
 - 生成的剧本落在 `engine/quillforge/samples/`，不在 `QUILLFORGE_VAR_DIR` 下。
   `register_generated_script` 要求剧本目录在 `SAMPLES_DIR` 之内。验证后清掉新增
   的未跟踪目录，别混进提交。
@@ -193,7 +194,7 @@ node scripts/integration-smoke.mjs                                            # 
 
 截至 2026-11-16：
 
-- 全量测试通过：367 + 90 + 18 + 9 + 15 = 499 项，跨模块冒烟 11 项。
+- 全量测试通过：380 + 90 + 18 + 9 + 15 = 512 项，跨模块冒烟 11 项。
 - 标题页与索尔维入场视频已恢复到 `public/videos/`。
 - 文档与真实游戏截图已补齐到 `docs/assets/screenshots/`。
 - 内置示例保留两个剧本包：`回响-DEMO` 与 `索尔维0801`，共 26 个宿主节拍。

@@ -309,11 +309,25 @@ def _remove_background_pil(image_path: Path) -> bool:
 # rembg session 单例（避免每次调用都重新初始化/下载模型，并发安全）
 _rembg_session = None
 _rembg_session_lock = threading.Lock()
+_rembg_missing_warned = False
 # 推理锁：Numba workqueue 层不支持多线程并发调用，必须串行化 rembg 推理
 _rembg_infer_lock = threading.Lock()
 # alpha matting 极慢（erode 滤波在 CPU 上每张数秒）且与绿幕管线（色度键+despill+defringe）功能重叠，
 # 默认关闭；如需开启设置环境变量 IMAGE_ALPHA_MATTING=1
 _ALPHA_MATTING = os.environ.get("IMAGE_ALPHA_MATTING", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _warn_rembg_missing() -> None:
+    global _rembg_missing_warned
+    if _rembg_missing_warned:
+        return
+    print(
+        "[image_gen] 未安装 rembg，立绘去背降级为纯 PIL 绿幕抠图；"
+        "请执行 pip install -r engine/requirements.txt",
+        flush=True,
+    )
+    _rembg_missing_warned = True
+
 
 def _get_rembg_session():
     """lazy 初始化 rembg session（线程安全单例）"""
@@ -336,7 +350,7 @@ def remove_background(image_path: Path) -> bool:
     try:
         from rembg import remove
     except Exception:
-        # 引擎默认 venv 不装 rembg/onnxruntime，回退到纯 PIL 绿幕抠图
+        _warn_rembg_missing()
         return _remove_background_pil(image_path)
     try:
         from PIL import Image

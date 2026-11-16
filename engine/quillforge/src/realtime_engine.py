@@ -60,7 +60,7 @@ def _build_realtime_client() -> LLMClient:
     model = (
         os.environ.get("SCRIPT_GEN_MODEL")
         or os.environ.get("DEEPSEEK_MODEL")
-        or "deepseek-chat"
+        or "deepseek-v4.1-flash-1017"
     )
     return LLMClient(
         model=model,

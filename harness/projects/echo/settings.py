@@ -119,9 +119,10 @@ def get_minigame_inject_config() -> dict:
     }
 
 
-def llm_model(env_var: str, default: str = "deepseek-v4-flash") -> str:
-    """玩法生成用的轻量模型名，可被环境变量覆盖。
-
-    与引擎 SCRIPT_GEN_MODEL 的约定一致：这类生成不占用游戏运行时模型。
-    """
-    return os.environ.get(env_var, default).strip() or default
+def llm_model(env_var: str, default: str = "deepseek-v4.1-flash-1017") -> str:
+    """玩法生成用的模型名，可被专用环境变量覆盖，默认跟随 DEEPSEEK_MODEL。"""
+    for candidate in (os.environ.get(env_var), os.environ.get("DEEPSEEK_MODEL"), default):
+        value = (candidate or "").strip()
+        if value:
+            return value
+    return default

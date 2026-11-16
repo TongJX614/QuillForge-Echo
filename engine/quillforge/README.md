@@ -22,7 +22,7 @@ quillforge/
 ├── prompts/               六份 Prompt 模板
 ├── config/                Harness 参数、角色卡、世界线、示例场景
 ├── samples/               内置剧本包：回响-DEMO、索尔维0801
-├── tests/                 367 项 pytest
+├── tests/                 380 项 pytest
 └── quillforge.md          上游完整技术规格
 ```
 
@@ -92,5 +92,5 @@ cd engine
 ../.venv/bin/python -m pytest quillforge/tests -q -m "not live"
 ```
 
-367 项。`live` 标记的测试需要真实大模型，默认排除。跨模块行为由仓库根的
+380 项。`live` 标记的测试需要真实大模型，默认排除。跨模块行为由仓库根的
 `node scripts/integration-smoke.mjs` 覆盖。

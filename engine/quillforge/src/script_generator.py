@@ -45,14 +45,14 @@ def _build_script_gen_client() -> LLMClient:
     """构建剧本生成专用 LLM 客户端。
 
     剧本生成使用轻量模型（flash），不受 .env 中 DEEPSEEK_MODEL 影响；
-    可通过 SCRIPT_GEN_MODEL 环境变量覆盖，默认 deepseek-v4-flash。
+    可通过 SCRIPT_GEN_MODEL 环境变量覆盖，默认 deepseek-v4.1-flash-1017。
     游戏运行时对话仍走 .env 配置的模型（如 v4-pro）。
 
     必须禁用 thinking，与 Harness 管线（sut.py）和实时管线（realtime_engine.py）
     保持一致：思考模型会把 max_tokens 耗尽在 reasoning 上，正式输出为空，
     而本模块的 Step 1A/1B 解析到空串时只会静默返回 None。
     """
-    model = os.environ.get("SCRIPT_GEN_MODEL", "deepseek-v4-flash")
+    model = os.environ.get("SCRIPT_GEN_MODEL", "deepseek-v4.1-flash-1017")
     from provider_key import current_provider_key
     return LLMClient(
         model=model,

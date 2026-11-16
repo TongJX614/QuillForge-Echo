@@ -120,7 +120,7 @@ sh scripts/fusion.sh   # 融合：引擎 8050，ECHO 5173
 
 依赖：
 
-- 引擎：Python 3.11，`engine/requirements.txt`，仓库根 `.venv`。`rembg` 可选，缺失时角色立绘回退为纯色抠图。
+- 引擎：Python 3.11，`engine/requirements.txt`，仓库根 `.venv`。`rembg[cpu]` 是必需依赖，首次立绘去背会下载 `isnet-anime` 模型；缺失时仅应急回退纯色抠图。
 - ECHO：Node.js 24，`projects/echo/apps/echo/node_modules`。依赖安装使用 pnpm 9+。
 
 ## 验证
@@ -131,14 +131,14 @@ sh scripts/test-all.sh
 
 | 套件 | 内容 | 数量 |
 | --- | --- | --- |
-| 引擎 pytest | 流水线、验证器、生图、TTS、注册表、路由 | 367 |
+| 引擎 pytest | 流水线、验证器、生图、TTS、注册表、路由 | 380 |
 | 接入层 pytest | 节拍、生成器、路由、启动器、上下文接地 | 90 |
 | 接入层 JS | 嵌入桥接、入口状态机、契约一致性 | 18 |
 | ECHO 仓库级 | 仓库结构、内容清单、公共文档 | 9 |
 | ECHO app 级 | 存档、任务、系统菜单、VR、对白接线 | 15 |
 | 跨模块冒烟 | 静态契约、引擎独立模式、融合模式 | 11 |
 
-合计 499 项测试与 11 项冒烟检查。冒烟在依赖缺失时明确报 SKIP，不伪装通过。
+合计 512 项测试与 11 项冒烟检查。冒烟在依赖缺失时明确报 SKIP，不伪装通过。
 
 ## 文档
 
