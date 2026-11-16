@@ -196,6 +196,30 @@ class TestNarrativeSUTInit:
         assert call_args[1]["api_key"] == "test-key"
         assert call_args[1]["api_base"] == "https://api.test.com"
 
+    @patch("quillforge.sut.LLMClient")
+    @patch("quillforge.sut.load_prompt")
+    def test_env_overrides_config_model_and_base(
+        self, mock_load_prompt, mock_llm_client, monkeypatch
+    ):
+        """环境变量优先于 YAML，避免 Harness 与实时模式使用不同服务商配置"""
+        mock_load_prompt.return_value = "mock prompt"
+        monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
+        monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://env.example/v1")
+        config = {
+            "quillforge": {
+                "llm": {
+                    "model": "yaml-model",
+                    "apiBase": "https://yaml.example",
+                }
+            }
+        }
+
+        NarrativeSUT(config=config)
+
+        call_args = mock_llm_client.call_args
+        assert call_args[1]["model"] == "env-model"
+        assert call_args[1]["api_base"] == "https://env.example/v1"
+
 
 # ═══════════════════════════════════════════════════════
 # NarrativeSUT LLM 调用测试
